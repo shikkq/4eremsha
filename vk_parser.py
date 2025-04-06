@@ -1,18 +1,28 @@
 import requests
 import time
 import re
-from database import add_shelter
-
+import json
 import os
 from dotenv import load_dotenv
+from database import add_shelter
 
 load_dotenv()
 
 VK_TOKEN = os.getenv("VK_TOKEN")
-
 VK_KEYWORDS = os.getenv("VK_KEYWORDS", "").split(",")
-
 VK_API_VERSION = "5.199"
+CACHE_FILE = "parsed_groups.json"
+
+# Загрузка кэша
+if os.path.exists(CACHE_FILE):
+    with open(CACHE_FILE, "r", encoding="utf-8") as f:
+        parsed_groups = set(json.load(f))
+else:
+    parsed_groups = set()
+
+def save_cache():
+    with open(CACHE_FILE, "w", encoding="utf-8") as f:
+        json.dump(list(parsed_groups), f)
 
 def get_city_id(city_name):
     url = "https://api.vk.com/method/database.getCities"
@@ -35,23 +45,18 @@ def extract_info_from_posts(posts_texts):
     for text in posts_texts:
         lowered = text.lower()
 
-        # Основная информация о нуждах
         if any(kw in lowered for kw in ["нужны", "срочно", "сбор", "помочь", "волонтёры", "приходите", "ждём"]):
             info_lines.append(text[:400])
 
-        # Телефоны
         phones = re.findall(r"\+7[\d\- ]{10,15}|\b8[\d\- ]{9,15}", text)
         contacts.update(phones)
 
-        # Email
         emails = re.findall(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", text)
         contacts.update(emails)
 
-        # Ссылки (вк, тг, формы и прочее)
         urls = re.findall(r"https?://[^\s]+", text)
         contacts.update(urls)
 
-        # Адреса
         if any(kw in lowered for kw in ["ул.", "улица", "проспект", "по адресу", "двор", "встреча в", "место встречи"]):
             addresses.add(text[:300])
 
@@ -65,7 +70,6 @@ def extract_info_from_posts(posts_texts):
 
     return result.strip()
 
-
 def get_group_posts(group_id):
     url = "https://api.vk.com/method/wall.get"
     params = {
@@ -75,15 +79,24 @@ def get_group_posts(group_id):
         "filter": "owner",
         "v": VK_API_VERSION
     }
-    res = requests.get(url, params=params).json()
-    posts = res.get("response", {}).get("items", [])
-    return [p["text"] for p in posts if "text" in p and len(p["text"]) > 50]
+    try:
+        res = requests.get(url, params=params).json()
+        posts = res.get("response", {}).get("items", [])
+        return [p["text"] for p in posts if "text" in p and len(p["text"]) > 50]
+    except Exception as e:
+        print(f"⚠️ Ошибка при получении постов группы {group_id}: {e}")
+        return []
 
 def search_vk_groups(city_name):
+    start = time.time()
+    print(f"\n🔍 [VK] Начинаю парсинг города: {city_name}")
+    
     city_id = get_city_id(city_name)
     if not city_id:
-        print(f"Город '{city_name}' не найден.")
+        print(f"❌ Город '{city_name}' не найден.")
         return
+
+    total_processed = 0
 
     for keyword in VK_KEYWORDS:
         url = "https://api.vk.com/method/groups.search"
@@ -97,15 +110,35 @@ def search_vk_groups(city_name):
         }
         res = requests.get(url, params=params).json()
         groups = res.get("response", {}).get("items", [])
+
         for group in groups:
             if group["is_closed"] == 0:
                 group_id = group["id"]
+                group_key = f"vk_{group_id}"
                 group_name = group["name"]
                 group_link = f"https://vk.com/{group['screen_name']}"
-                
-                # Сбор постов и анализ
+
+                print(f"   🔹 [{total_processed+1}/10] {group_name}")
+
+                # Получаем посты и анализируем каждый раз
                 post_texts = get_group_posts(group_id)
                 info = extract_info_from_posts(post_texts)
 
-                add_shelter(f"vk_{group_id}", group_name, group_link, city_name, info)
+                add_shelter(group_key, group_name, group_link, city_name, info)
+
+                # Добавляем в кэш только если новой группы не было
+                if group_key not in parsed_groups:
+                    parsed_groups.add(group_key)
+                    save_cache()
+
+                total_processed += 1
+                if total_processed >= 10:
+                    print("📦 Достигнут лимит в 10 групп.")
+                    break
+
+        if total_processed >= 10:
+            break
+
         time.sleep(1)
+
+    print(f"✅ [VK] Город {city_name} обработан за {time.time() - start:.2f} сек")
