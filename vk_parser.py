@@ -1,8 +1,15 @@
 import requests
 import time
 import re
-from config import VK_TOKEN, VK_KEYWORDS
 from database import add_shelter
+
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+VK_TOKEN = os.getenv("VK_TOKEN")
+VK_KEYWORDS = ["приют", "волонтер", "животные", "собаки", "кошки"]
 
 VK_API_VERSION = "5.199"
 
