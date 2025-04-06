@@ -18,7 +18,7 @@ load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 VK_TOKEN = os.getenv("VK_TOKEN")
 
-VK_KEYWORDS = ["приют", "волонтер", "животные", "собаки", "кошки"]
+VK_KEYWORDS = os.getenv("VK_KEYWORDS", "").split(",")
 DB_PATH = "shelters.db"
 
 bot = Bot(token=TELEGRAM_TOKEN)

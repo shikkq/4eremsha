@@ -1,0 +1,36 @@
+name: Daily Shelter Parser
+
+on:
+  schedule:
+    - cron: '0 6 * * *'  # каждый день в 6:00 UTC (9:00 МСК)
+  workflow_dispatch:      # запуск вручную
+
+jobs:
+  run-parser:
+    runs-on: ubuntu-latest
+
+    env:
+      VK_TOKEN: ${{ secrets.VK_TOKEN }}
+      TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+      VK_KEYWORDS: ${{ secrets.VK_KEYWORDS }}
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run update script
+        run: |
+          echo "VK_TOKEN=$VK_TOKEN" > .env
+          echo "TELEGRAM_TOKEN=$TELEGRAM_TOKEN" >> .env
+          echo "VK_KEYWORDS=$VK_KEYWORDS" >> .env
+          python update_shelters.py

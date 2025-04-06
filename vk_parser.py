@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 VK_TOKEN = os.getenv("VK_TOKEN")
-VK_KEYWORDS = ["приют", "волонтер", "животные", "собаки", "кошки"]
+VK_KEYWORDS = os.getenv("VK_KEYWORDS", "").split(",")
 
 VK_API_VERSION = "5.199"
 
