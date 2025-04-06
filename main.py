@@ -1,5 +1,7 @@
 import asyncio
 import sqlite3
+import os
+from dotenv import load_dotenv
 
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.types import (
@@ -10,9 +12,16 @@ from aiogram.filters import Command
 
 from database import init_db
 from vk_parser import search_vk_groups
-from config import TELEGRAM_BOT_TOKEN
 
-bot = Bot(token=TELEGRAM_BOT_TOKEN)
+load_dotenv()
+
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+VK_TOKEN = os.getenv("VK_TOKEN")
+
+VK_KEYWORDS = ["приют", "волонтер", "животные", "собаки", "кошки"]
+DB_PATH = "shelters.db"
+
+bot = Bot(token=TELEGRAM_TOKEN)
 dp = Dispatcher()
 init_db()
 
@@ -45,7 +54,7 @@ async def handle_city_choice(message: Message):
     user_city[user_id] = city
     await message.answer(f"Ищем приюты в городе {city}, подождите немного...")
 
-    conn = sqlite3.connect("shelters.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT id, name FROM shelters WHERE city=?", (city,))
     shelters = c.fetchall()
@@ -66,7 +75,7 @@ async def handle_city_choice(message: Message):
 async def show_info(callback: types.CallbackQuery):
     shelter_id = callback.data[5:]
 
-    conn = sqlite3.connect("shelters.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT name, link, info FROM shelters WHERE id=?", (shelter_id,))
     row = c.fetchone()
@@ -90,7 +99,7 @@ async def choose_filter(message: Message):
         return
 
     selected_type = message.text
-    conn = sqlite3.connect("shelters.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT id, name, info FROM shelters WHERE city=?", (city,))
     shelters = c.fetchall()
