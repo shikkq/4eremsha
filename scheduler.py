@@ -1,23 +1,22 @@
 import schedule
 import time
-import sqlite3
 from vk_parser import search_vk_groups
+
+# Список городов, которые ты хочешь парсить каждый день
+CITIES = ["Москва", "Санкт-Петербург", "Новосибирск", "Екатеринбург", "Казань"]
 
 def update_all_cities():
     print("🔄 Обновление приютов по городам...")
-    conn = sqlite3.connect("shelters.db")
-    c = conn.cursor()
-    c.execute("SELECT DISTINCT city FROM shelters")
-    cities = [row[0] for row in c.fetchall()]
-    conn.close()
-
-    for city in cities:
+    for city in CITIES:
         print(f"📍 Обновляю {city}...")
         search_vk_groups(city)
+        print(f"✅ Готово: {city}")
 
+# Планируем запуск каждый день в 03:00
 schedule.every().day.at("03:00").do(update_all_cities)
 
 if __name__ == "__main__":
+    print("📅 Планировщик запущен. Ожидаем следующего запуска...")
     while True:
         schedule.run_pending()
         time.sleep(60)
