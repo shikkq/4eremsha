@@ -168,3 +168,9 @@ def search_vk_groups(city_name):
         time.sleep(1)
 
     print(f"✅ [VK] Город {city_name} обработан за {time.time() - start:.2f} сек")
+
+def run_parser():
+    # Здесь можно указать нужные города
+    cities = ["Москва", "Санкт-Петербург", "Новосибирск"]  # добавь свои города
+    for city in cities:
+        search_vk_groups(city)
