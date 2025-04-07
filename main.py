@@ -7,7 +7,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import Update
 
 from bot import dp  # импорт aiogram.Dispatcher
-from parser import run_parser  # функция запуска парсера
+from vk_parser import run_parser  # функция запуска парсера
 
 # Загрузка .env
 load_dotenv()
