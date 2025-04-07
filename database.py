@@ -1,5 +1,5 @@
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 
 DB_PATH = "shelters.db"
 
@@ -37,6 +37,17 @@ def init_db():
         )
     """)
 
+    # таблица постов из избранных приютов
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS favorite_posts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            group_id TEXT,
+            post_url TEXT UNIQUE,
+            text TEXT,
+            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -48,11 +59,8 @@ def add_shelter(id, name, link, city, info=""):
         c.execute("INSERT INTO shelters VALUES (?, ?, ?, ?, ?)", (id, name, link, city, info))
         conn.commit()
     except sqlite3.IntegrityError:
-        # Приют уже есть
         pass
     conn.close()
-
-from datetime import timedelta
 
 def get_shelters_for_city(city, limit=20):
     conn = sqlite3.connect(DB_PATH)
@@ -68,10 +76,8 @@ def get_shelters_for_city(city, limit=20):
     now = datetime.now().date()
 
     if shown:
-        # Проверяем, прошло ли 3 дня
         shown_date = datetime.strptime(shown[0][1], "%Y-%m-%d").date()
         if (now - shown_date).days < 3:
-            # Возвращаем уже показанные приюты
             ids = tuple([s[0] for s in shown])
             query = f"SELECT * FROM shelters WHERE id IN ({','.join(['?']*len(ids))})"
             cursor.execute(query, ids)
@@ -97,8 +103,8 @@ def get_shelters_for_city(city, limit=20):
         """, (city, row[0], now.strftime("%Y-%m-%d")))
     conn.commit()
     conn.close()
-
     return result
+
 
 def add_favorite(user_id, post_url, group_id):
     conn = sqlite3.connect(DB_PATH)
@@ -109,6 +115,7 @@ def add_favorite(user_id, post_url, group_id):
     """, (user_id, post_url, group_id))
     conn.commit()
     conn.close()
+
 
 def get_user_favorites(user_id):
     conn = sqlite3.connect(DB_PATH)
@@ -122,3 +129,56 @@ def get_user_favorites(user_id):
     conn.close()
     return favorites
 
+def get_recent_posts_for_group(group_id, days=7):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cutoff = datetime.now() - timedelta(days=days)
+    cursor.execute("""
+        SELECT post_url, text FROM favorite_posts
+        WHERE group_id = ? AND added_at >= ?
+        ORDER BY added_at DESC
+    """, (group_id, cutoff))
+    posts = cursor.fetchall()
+    conn.close()
+    return posts
+
+
+# 🔽 Новые функции для парсинга актуальных постов избранных групп
+
+def get_favorite_group_ids():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT DISTINCT group_id FROM favorites")
+    result = cursor.fetchall()
+    conn.close()
+    return [r[0] for r in result]
+
+def post_already_saved(post_url):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT 1 FROM favorite_posts WHERE post_url = ?", (post_url,))
+    result = cursor.fetchone()
+    conn.close()
+    return result is not None
+
+def save_favorite_post(group_id, post_url, text):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT OR IGNORE INTO favorite_posts (group_id, post_url, text)
+        VALUES (?, ?, ?)
+    """, (group_id, post_url, text))
+    conn.commit()
+    conn.close()
+
+def get_latest_favorite_posts(limit=10):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT post_url, text FROM favorite_posts
+        ORDER BY added_at DESC
+        LIMIT ?
+    """, (limit,))
+    result = cursor.fetchall()
+    conn.close()
+    return result

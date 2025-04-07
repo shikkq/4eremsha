@@ -3,6 +3,7 @@ import time
 import re
 import json
 import os
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from database import add_shelter
 
@@ -82,7 +83,27 @@ def get_group_posts(group_id):
     try:
         res = requests.get(url, params=params).json()
         posts = res.get("response", {}).get("items", [])
-        return [p["text"] for p in posts if "text" in p and len(p["text"]) > 50]
+        fresh_posts = []
+        fourteen_days_ago = datetime.now() - timedelta(days=14)
+
+        for post in posts:
+            date_unix = post.get("date")
+            text = post.get("text", "")
+            if date_unix and text and len(text) > 50:
+                post_date = datetime.fromtimestamp(date_unix)
+                if post_date > fourteen_days_ago:
+                    fresh_posts.append(text)
+
+        # Если нет свежих — добавляем последний с пометкой
+        if not fresh_posts and posts:
+            latest_post = posts[0]
+            last_text = latest_post.get("text", "")[:400]
+            if last_text:
+                last_date = datetime.fromtimestamp(latest_post["date"]).strftime("%d.%m.%Y")
+                return [f"(неактивно, последний пост: {last_date})\n\n{last_text}"]
+
+        return fresh_posts
+
     except Exception as e:
         print(f"⚠️ Ошибка при получении постов группы {group_id}: {e}")
         return []
@@ -120,13 +141,18 @@ def search_vk_groups(city_name):
 
                 print(f"   🔹 [{total_processed+1}/10] {group_name}")
 
-                # Получаем посты и анализируем каждый раз
                 post_texts = get_group_posts(group_id)
+                if not post_texts:
+                    print("   ⚠️ Нет подходящих постов, пропускаем.")
+                    continue
+
                 info = extract_info_from_posts(post_texts)
+                if not info:
+                    print("   ⚠️ Нет полезной информации, пропускаем.")
+                    continue
 
                 add_shelter(group_key, group_name, group_link, city_name, info)
 
-                # Добавляем в кэш только если новой группы не было
                 if group_key not in parsed_groups:
                     parsed_groups.add(group_key)
                     save_cache()
