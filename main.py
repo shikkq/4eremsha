@@ -6,19 +6,17 @@ from aiogram import Bot, types
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import Update
 
-from bot import dp  # импорт aiogram.Dispatcher
-from vk_parser import run_parser  # функция запуска парсера
+from bot import dp  # Dispatcher с зарегистрированными хендлерами
+from vk_parser import run_parser
 
-# Загрузка .env
+# Загрузка переменных окружения
 load_dotenv()
 TOKEN = os.getenv("TELEGRAM_TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # например: https://yourapp.onrender.com/webhook
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
-# Инициализация
+# Инициализация бота и Flask
 bot = Bot(token=TOKEN)
 storage = MemoryStorage()
-
-# Flask-приложение
 app = Flask(__name__)
 
 @app.route("/ping")
@@ -33,11 +31,12 @@ def parser_runner():
     except Exception as e:
         return f"Ошибка запуска парсера: {e}", 500
 
-@app.post("/webhook")
-def webhook():
+@app.route("/", methods=["POST"])
+def telegram_webhook():
     try:
-        update = Update.model_validate_json(request.get_data().decode("utf-8"))
-        asyncio.run(dp.feed_update(bot, update))
+        json_data = request.get_data().decode("utf-8")
+        update = Update.model_validate_json(json_data)
+        asyncio.create_task(dp.feed_update(bot, update))
     except Exception as e:
         print(f"Ошибка обработки webhook: {e}")
     return "ok", 200
@@ -48,5 +47,6 @@ async def on_startup():
     print(f"Webhook установлен: {WEBHOOK_URL}")
 
 if __name__ == "__main__":
-    asyncio.run(on_startup())  # Устанавливаем webhook
-    app.run(host="0.0.0.0", port=10000)  # Запускаем Flask
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(on_startup())
+    app.run(host="0.0.0.0", port=10000)
