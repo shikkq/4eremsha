@@ -45,8 +45,14 @@ def webhook():
 # Установка webhook при старте
 async def on_startup():
     await bot.set_webhook(WEBHOOK_URL)
-    print("Webhook установлен:", WEBHOOK_URL)
+    print(f"Webhook установлен: {WEBHOOK_URL}")
+
+@app.before_first_request
+def setup_webhook():
+    loop = asyncio.get_event_loop()
+    loop.create_task(on_startup())
 
 if __name__ == "__main__":
-    asyncio.run(on_startup())  # Устанавливаем webhook
+    # Только для локального запуска
+    asyncio.run(on_startup())
     app.run(host="0.0.0.0", port=10000)
