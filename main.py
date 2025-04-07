@@ -31,7 +31,7 @@ def parser_runner():
     except Exception as e:
         return f"Ошибка запуска парсера: {e}", 500
 
-@app.route("/", methods=["POST"])
+@app.route("/webhook", methods=["POST"])
 def telegram_webhook():
     try:
         json_data = request.get_data().decode("utf-8")
