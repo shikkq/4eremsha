@@ -158,7 +158,7 @@ def search_vk_groups(city_name):
                     save_cache()
 
                 total_processed += 1
-                if total_processed >= 10:
+                if total_processed >= 5:
                     print("📦 Достигнут лимит в 10 групп.")
                     break
 
