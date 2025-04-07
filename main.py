@@ -11,7 +11,7 @@ from vk_parser import run_parser  # функция запуска парсера
 
 # Загрузка .env
 load_dotenv()
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TOKEN = os.getenv("TELEGRAM_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # например: https://yourapp.onrender.com/webhook
 
 # Инициализация
