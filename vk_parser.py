@@ -171,6 +171,6 @@ def search_vk_groups(city_name):
 
 def run_parser():
     # Здесь можно указать нужные города
-    cities = ["Москва", "Санкт-Петербург", "Новосибирск"]  # добавь свои города
+    cities = ["Новосибирск"]  # добавь свои города
     for city in cities:
         search_vk_groups(city)

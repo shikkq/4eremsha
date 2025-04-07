@@ -13,7 +13,7 @@ from database import (
 
 init_db()
 dp = Dispatcher()
-CITIES = ["Москва", "Санкт-Петербург", "Новосибирск", "Екатеринбург", "Казань"]
+CITIES = ["Новосибирск"]
 user_city: dict[int, str] = {}
 
 @dp.message(Command("start"))
