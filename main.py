@@ -36,7 +36,11 @@ def telegram_webhook():
     try:
         json_data = request.get_data().decode("utf-8")
         update = Update.model_validate_json(json_data)
-        asyncio.create_task(dp.feed_update(bot, update))
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(dp.feed_update(bot, update))
+        loop.close()
     except Exception as e:
         print(f"Ошибка обработки webhook: {e}")
     return "ok", 200
