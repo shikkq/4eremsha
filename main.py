@@ -30,8 +30,8 @@ async def telegram_webhook(request: Request):
     return {"status": "ok"}
 
 @app.get("/")
-def index():
-    return {"status": "Bot is running!"}
+def root():
+    return {"message": "Hello from FastAPI"}
 
 @app.get("/ping")
 def ping():
