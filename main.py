@@ -37,8 +37,6 @@ def root():
 def ping():
     return {"pong": True}
 
-from run_parser import run_parser
-
 @app.get("/run-parser")
 def run_parser_route():
     try:
