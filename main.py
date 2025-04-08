@@ -37,10 +37,12 @@ def root():
 def ping():
     return {"pong": True}
 
+from run_parser import run_parser
+
 @app.get("/run-parser")
 def run_parser_route():
     try:
-        update_all_cities()
+        run_parser()
         return {"status": "Парсинг завершён"}
     except Exception as e:
         return {"error": str(e)}
