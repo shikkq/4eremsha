@@ -60,6 +60,9 @@ async def on_startup():
     print(f"✅ Webhook установлен: {WEBHOOK_URL}")
 
 if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(on_startup())
+    import threading
+
+    loop = asyncio.new_event_loop()
+    threading.Thread(target=loop.run_until_complete, args=(on_startup(),)).start()
     app.run(host="0.0.0.0", port=10000)
+

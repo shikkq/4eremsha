@@ -174,3 +174,6 @@ def run_parser():
     cities = ["Новосибирск"]  # добавь свои города
     for city in cities:
         search_vk_groups(city)
+
+if __name__ == "__main__":
+    run_parser()
