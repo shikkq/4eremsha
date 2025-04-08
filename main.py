@@ -42,7 +42,7 @@ from run_parser import run_parser
 @app.get("/run-parser")
 def run_parser_route():
     try:
-        update_all_cities()
+        update_all_cities()  # Вызываем её вместо run_parser
         return {"status": "Парсинг завершён"}
     except Exception as e:
         return {"error": str(e)}
