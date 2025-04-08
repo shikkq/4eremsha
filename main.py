@@ -5,8 +5,8 @@ from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import Update
 
-from bot import dp  # Dispatcher с зарегистрированными хендлерами
-from run_parser import update_all_cities  # обновление приютов + избранного
+from bot import dp
+import run_parser
 
 # Загрузка переменных окружения
 load_dotenv()
@@ -42,7 +42,7 @@ from run_parser import run_parser
 @app.get("/run-parser")
 def run_parser_route():
     try:
-        run_parser()
+        update_all_cities()
         return {"status": "Парсинг завершён"}
     except Exception as e:
         return {"error": str(e)}
