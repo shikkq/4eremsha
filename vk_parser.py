@@ -170,6 +170,7 @@ def search_vk_groups(city_name):
     print(f"✅ [VK] Город {city_name} обработан за {time.time() - start:.2f} сек")
 
 def run_parser():
+    print("Парсер работает")
     # Здесь можно указать нужные города
     cities = ["Новосибирск"]  # добавь свои города
     for city in cities:
