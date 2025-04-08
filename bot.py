@@ -46,12 +46,15 @@ async def show_shelters(message: Message, city: str):
         return
     for shelter in shelters:
         text = f"<b>{shelter[1]}</b>\n\n{(shelter[4] or '')}\n\n🔗 {shelter[2]}"
-        if len(text) > 4096:
-            text = text[:4093] + "..."
-        button = InlineKeyboardMarkup().add(
-            InlineKeyboardButton("⭐ В избранное", callback_data=f"fav|{shelter[0]}|{shelter[2]}")
-        )
-        await message.answer(text, reply_markup=button, parse_mode="HTML")
+        text = text[:4093] + "..." if len(text) > 4096 else text
+        try:
+            button = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="⭐ В избранное", callback_data=f"fav|{shelter[0]}|{shelter[2]}")]
+            ])
+            await message.answer(text, reply_markup=button, parse_mode="HTML")
+        except Exception as e:
+            await message.answer("⚠️ Не удалось отправить приют. Проблема с кнопкой.")
+            print("Ошибка при отправке приюта:", e)
 
 @dp.callback_query(lambda c: c.data.startswith("info_"))
 async def show_info(callback: types.CallbackQuery):

@@ -144,7 +144,7 @@ def search_vk_groups(city_name):
                 group_name = group["name"]
                 group_link = f"https://vk.com/{group['screen_name']}"
 
-                print(f"   🔹 [{total_processed+1}/10] {group_name}")
+                print(f"   🔹 {group_name}")
 
                 post_texts = get_group_posts(group_id)
                 if not post_texts:
@@ -156,6 +156,7 @@ def search_vk_groups(city_name):
                     print("   ⚠️ Нет полезной информации, пропускаем.")
                     continue
 
+                # Добавление в базу и учёт в лимит
                 add_shelter(group_key, group_name, group_link, city_name, info)
 
                 if group_key not in parsed_groups:
@@ -163,13 +164,11 @@ def search_vk_groups(city_name):
                     save_cache()
 
                 total_processed += 1
-                if total_processed >= 5:
+                print(f"   ✅ Добавлен [{total_processed}/10]")
+
+                if total_processed >= 10:
                     print("📦 Достигнут лимит в 10 групп.")
                     break
 
-        if total_processed >= 10:
-            break
-
-        time.sleep(1)
 
     print(f"✅ [VK] Город {city_name} обработан за {time.time() - start:.2f} сек")

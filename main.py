@@ -1,10 +1,12 @@
 import os
-from fastapi import FastAPI, Request
 from dotenv import load_dotenv
+from threading import Thread
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, Request
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import Update
-from threading import Thread
 
 from bot import dp
 from run_parser import update_all_cities
@@ -15,11 +17,24 @@ TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "supersecret")
 RENDER_URL = os.getenv("RENDER_EXTERNAL_URL")
 
-# FastAPI и aiogram
-app = FastAPI()
+# Инициализация aiogram компонентов
 bot = Bot(token=TOKEN)
 storage = MemoryStorage()
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    if RENDER_URL:
+        webhook_url = f"{RENDER_URL}/webhook/{WEBHOOK_URL}"
+        await bot.set_webhook(webhook_url)
+        print(f"✅ Webhook установлен: {webhook_url}")
+    else:
+        print("❌ Не задан RENDER_EXTERNAL_URL")
+    yield  # тут может быть логика завершения (on shutdown)
+
+# Инициализация FastAPI
+app = FastAPI(lifespan=lifespan)
+
+# Webhook-обработчик
 @app.post(f"/webhook/{WEBHOOK_URL}")
 async def telegram_webhook(request: Request):
     try:
@@ -42,17 +57,8 @@ def ping():
 def run_parser_route():
     try:
         Thread(target=update_all_cities).start()
-        return {"status": "Парсинг завершён"}
+        return {"status": "Парсинг запущен"}
     except Exception as e:
         return {"error": str(e)}
-
-@app.on_event("startup")
-async def on_startup():
-    if RENDER_URL:
-        webhook_url = f"{RENDER_URL}/webhook/{WEBHOOK_URL}"
-        await bot.set_webhook(webhook_url)
-        print(f"✅ Webhook установлен: {webhook_url}")
-    else:
-        print("❌ Не задан RENDER_EXTERNAL_URL")
 
 print(f"🌐 Starting app on port: {os.environ.get('PORT')}")
