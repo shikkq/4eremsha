@@ -67,8 +67,7 @@ async def on_startup():
         print("❌ Не задан RENDER_EXTERNAL_URL")
 
 if __name__ == "__main__":
-    loop = asyncio.new_event_loop()
-    threading.Thread(target=loop.run_until_complete, args=(on_startup(),)).start()
+    asyncio.run(on_startup())
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
 
