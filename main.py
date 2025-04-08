@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import Update
+from threading import Thread
 
 from bot import dp
 from run_parser import update_all_cities
@@ -40,7 +41,7 @@ def ping():
 @app.get("/run-parser")
 def run_parser_route():
     try:
-        update_all_cities()  # Вызываем её вместо run_parser
+        Thread(target=update_all_cities).start()
         return {"status": "Парсинг завершён"}
     except Exception as e:
         return {"error": str(e)}
