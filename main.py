@@ -6,7 +6,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import Update
 
 from bot import dp
-import run_parser
+from run_parser import update_all_cities
 
 # Загрузка переменных окружения
 load_dotenv()
