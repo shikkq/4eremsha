@@ -1,3 +1,4 @@
+#vk_parser.py
 import requests
 import time
 import re
