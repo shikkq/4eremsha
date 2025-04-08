@@ -43,7 +43,12 @@ def extract_info_from_posts(posts_texts):
     contacts = set()
     addresses = set()
 
-    for text in posts_texts:
+    for post in posts_texts:
+        # Извлекаем текст из словаря, если он есть
+        text = post.get("text") if isinstance(post, dict) else post
+        if not isinstance(text, str):
+            continue  # Пропустить, если не строка
+
         lowered = text.lower()
 
         if any(kw in lowered for kw in ["нужны", "срочно", "сбор", "помочь", "волонтёры", "приходите", "ждём"]):
@@ -70,6 +75,7 @@ def extract_info_from_posts(posts_texts):
         result += "\n📍 Адрес или место:\n" + "\n".join(addresses) + "\n"
 
     return result.strip()
+
 
 def get_group_posts(group_id):
     url = "https://api.vk.com/method/wall.get"
