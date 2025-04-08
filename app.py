@@ -13,7 +13,7 @@ from vk_parser import run_parser
 # Загрузка переменных окружения
 load_dotenv()
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_TOKEN")
-WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "supersecret")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL", "supersecret")
 RENDER_URL = os.getenv("RENDER_EXTERNAL_URL")  # Render подставит это
 
 # Flask и aiogram
@@ -22,7 +22,7 @@ bot = Bot(token=TOKEN)
 storage = MemoryStorage()
 
 # Telegram webhook
-@app.route(f"/webhook/{WEBHOOK_SECRET}", methods=["POST"])
+@app.route(f"/webhook/{WEBHOOK_URL}", methods=["POST"])
 def telegram_webhook():
     try:
         json_data = request.get_data().decode("utf-8")
@@ -61,12 +61,14 @@ def ping():
 # Установка webhook при старте
 async def on_startup():
     if RENDER_URL:
-        await bot.set_webhook(f"{RENDER_URL}/webhook/{WEBHOOK_SECRET}")
-        print(f"✅ Webhook установлен: {RENDER_URL}/webhook/{WEBHOOK_SECRET}")
+        await bot.set_webhook(f"{RENDER_URL}/webhook/{WEBHOOK_URL}")
+        print(f"✅ Webhook установлен: {RENDER_URL}/webhook/{WEBHOOK_URL}")
     else:
         print("❌ Не задан RENDER_EXTERNAL_URL")
 
 if __name__ == "__main__":
     loop = asyncio.new_event_loop()
     threading.Thread(target=loop.run_until_complete, args=(on_startup(),)).start()
-    app.run(host="0.0.0.0", port=10000)
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
+
