@@ -1,74 +1,55 @@
-#main.py
 import os
-import asyncio
-import threading
-from flask import Flask, request
+from fastapi import FastAPI, Request
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import Update
 
 from bot import dp  # Dispatcher с зарегистрированными хендлерами
-from vk_parser import run_parser
+from run_parser import update_all_cities  # обновление приютов + избранного
 
 # Загрузка переменных окружения
 load_dotenv()
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "supersecret")
-RENDER_URL = os.getenv("RENDER_EXTERNAL_URL")  # Render подставит это
+RENDER_URL = os.getenv("RENDER_EXTERNAL_URL")
 
-# Flask и aiogram
-app = Flask(__name__)
+# FastAPI и aiogram
+app = FastAPI()
 bot = Bot(token=TOKEN)
 storage = MemoryStorage()
 
-# Telegram webhook
-@app.route(f"/webhook/{WEBHOOK_URL}", methods=["POST"])
-def telegram_webhook():
+@app.post(f"/webhook/{WEBHOOK_URL}")
+async def telegram_webhook(request: Request):
     try:
-        json_data = request.get_data().decode("utf-8")
-        update = Update.model_validate_json(json_data)
-
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_closed():
-                raise RuntimeError
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
-        loop.run_until_complete(dp.feed_update(bot, update))
+        body = await request.body()
+        update = Update.model_validate_json(body.decode("utf-8"))
+        await dp.feed_update(bot, update)
     except Exception as e:
         print(f"Ошибка обработки webhook: {e}")
-    return "ok", 200
+    return {"status": "ok"}
 
-# Эндпоинт для парсера (вызывается Cron-job.org)
-@app.route("/run-parser")
-def parser_runner():
-    try:
-        run_parser()
-        return "Парсер успешно запущен", 200
-    except Exception as e:
-        return f"Ошибка запуска парсера: {e}", 500
-
-@app.route("/")
+@app.get("/")
 def index():
-    return "Bot is running!", 200
+    return {"status": "Bot is running!"}
 
-@app.route("/ping")
+@app.get("/ping")
 def ping():
-    return "pong", 200
+    return {"pong": True}
 
-# Установка webhook при старте
+@app.get("/run-parser")
+def run_parser_route():
+    try:
+        update_all_cities()
+        return {"status": "Парсинг завершён"}
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.on_event("startup")
 async def on_startup():
     if RENDER_URL:
-        await bot.set_webhook(f"{RENDER_URL}/webhook/{WEBHOOK_URL}")
-        print(f"✅ Webhook установлен: {RENDER_URL}/webhook/{WEBHOOK_URL}")
+        webhook_url = f"{RENDER_URL}/webhook/{WEBHOOK_URL}"
+        await bot.set_webhook(webhook_url)
+        print(f"✅ Webhook установлен: {webhook_url}")
     else:
         print("❌ Не задан RENDER_EXTERNAL_URL")
-
-if __name__ == "__main__":
-    asyncio.run(on_startup())
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
-

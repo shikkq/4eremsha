@@ -1,11 +1,9 @@
-import sqlite3
 from aiogram import Dispatcher, types, F
 from aiogram.types import (
     Message, InlineKeyboardMarkup, InlineKeyboardButton,
     ReplyKeyboardMarkup, KeyboardButton
 )
 from aiogram.filters import Command
-
 from database import (
     init_db, get_shelters_for_city, add_favorite,
     get_user_favorites, get_recent_posts_for_group
@@ -21,21 +19,15 @@ async def start_handler(message: Message):
     buttons = [[KeyboardButton(text=city)] for city in CITIES]
     buttons.append([KeyboardButton(text="Другой город")])
     keyboard = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
-
-    await message.answer(
-        "Привет! Выберите город, чтобы найти приюты, которым нужна помощь:",
-        reply_markup=keyboard
-    )
+    await message.answer("Привет! Выберите город, чтобы найти приюты, которым нужна помощь:", reply_markup=keyboard)
 
 @dp.message(lambda m: m.text in CITIES or m.text == "Другой город")
 async def handle_city_choice(message: Message):
     user_id = message.from_user.id
     city = message.text
-
     if city == "Другой город":
         await message.answer("Введите название города вручную:")
         return
-
     user_city[user_id] = city
     await message.answer(f"Ищем приюты в городе {city}, подождите немного...")
     await show_shelters(message, city)
@@ -49,11 +41,9 @@ async def handle_custom_city(message: Message):
 
 async def show_shelters(message: Message, city: str):
     shelters = get_shelters_for_city(city)
-
     if not shelters:
         await message.answer("К сожалению, ничего не найдено.")
         return
-
     for shelter in shelters:
         text = f"<b>{shelter[1]}</b>\n\n{(shelter[4] or '')}\n\n🔗 {shelter[2]}"
         if len(text) > 4096:
@@ -66,29 +56,22 @@ async def show_shelters(message: Message, city: str):
 @dp.callback_query(lambda c: c.data.startswith("info_"))
 async def show_info(callback: types.CallbackQuery):
     shelter_id = callback.data[5:]
-
-    conn = sqlite3.connect("shelters.db")
-    c = conn.cursor()
-    c.execute("SELECT name, link, info FROM shelters WHERE id=?", (shelter_id,))
-    row = c.fetchone()
-    conn.close()
-
+    from database import get_shelter_by_id
+    row = get_shelter_by_id(shelter_id)
     if row:
         name, link, info = row
-        msg = f"<b>{name}</b>\n{link}\n\n{info}"
+        msg = f"<b>{name}</b>\n{link}\n\n{info or 'Нет описания.'}"
         if len(msg) > 4096:
             msg = msg[:4093] + "..."
         await callback.message.answer(msg, parse_mode="HTML")
     else:
         await callback.message.answer("Не удалось найти информацию.")
-
     await callback.answer()
 
 @dp.callback_query(lambda c: c.data.startswith("fav|"))
 async def add_to_favorites(callback: types.CallbackQuery):
     _, group_id, post_url = callback.data.split("|")
     user_id = callback.from_user.id
-
     add_favorite(user_id, post_url, group_id)
     await callback.answer("Добавлено в избранное! ⭐")
 
@@ -101,11 +84,9 @@ def get_favorite_shelter_markup(group_id: str) -> InlineKeyboardMarkup:
 async def show_favorites(message: Message):
     user_id = message.from_user.id
     favorites = get_user_favorites(user_id)
-
     if not favorites:
         await message.reply("У вас нет избранных постов.")
         return
-
     for post_url, group_id in favorites:
         await message.answer(f"🔗 {post_url}", reply_markup=get_favorite_shelter_markup(group_id))
 
@@ -113,7 +94,6 @@ async def show_favorites(message: Message):
 async def handle_recent_posts(callback_query: types.CallbackQuery):
     group_id = callback_query.data.replace("recent_posts_", "")
     posts = get_recent_posts_for_group(group_id)
-
     if posts:
         for url, text in posts:
             msg = f"{text}\n\n🔗 {url}"
@@ -122,7 +102,6 @@ async def handle_recent_posts(callback_query: types.CallbackQuery):
             await callback_query.message.answer(msg)
     else:
         await callback_query.message.answer("Нет свежих постов за последние 7 дней 😿")
-
     await callback_query.answer()
 
 @dp.message(lambda m: m.text in ["🔧 Волонтёрство", "📦 Сбор"])
@@ -131,29 +110,13 @@ async def choose_filter(message: Message):
     if not city:
         await message.answer("Сначала выберите или введите город.")
         return
-
+    from database import get_filtered_shelters
     selected_type = message.text
-    filtered = []
-
-    conn = sqlite3.connect("shelters.db")
-    c = conn.cursor()
-    c.execute("SELECT id, name, info FROM shelters WHERE city=?", (city,))
-    shelters = c.fetchall()
-    conn.close()
-
-    for sid, name, info in shelters:
-        info_lower = (info or "").lower()
-        if selected_type == "🔧 Волонтёрство" and any(word in info_lower for word in ["волонтёр", "приходите", "помочь"]):
-            filtered.append((sid, name))
-        elif selected_type == "📦 Сбор" and any(word in info_lower for word in ["корм", "лекарства", "сбор", "деньги"]):
-            filtered.append((sid, name))
-
+    filtered = get_filtered_shelters(city, selected_type)
     if not filtered:
         await message.answer("По этому фильтру ничего не найдено.")
         return
-
     keyboard = InlineKeyboardMarkup()
     for shelter_id, name in filtered[:10]:
         keyboard.add(InlineKeyboardButton(text=name, callback_data=f"info_{shelter_id}"))
-
     await message.answer("Вот, что удалось найти:", reply_markup=keyboard)

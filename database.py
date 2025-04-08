@@ -78,12 +78,13 @@ def get_shelters_for_city(city, limit=20):
     if shown:
         shown_date = datetime.strptime(shown[0][1], "%Y-%m-%d").date()
         if (now - shown_date).days < 3:
-            ids = tuple([s[0] for s in shown])
-            query = f"SELECT * FROM shelters WHERE id IN ({','.join(['?']*len(ids))})"
-            cursor.execute(query, ids)
-            result = cursor.fetchall()
-            conn.close()
-            return result
+            ids = [s[0] for s in shown]
+            if ids:
+                query = f"SELECT * FROM shelters WHERE id IN ({','.join(['?']*len(ids))})"
+                cursor.execute(query, ids)
+                result = cursor.fetchall()
+                conn.close()
+                return result
 
     # 2. Иначе — выбираем новые приюты
     cursor.execute("""
@@ -110,7 +111,7 @@ def add_favorite(user_id, post_url, group_id):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO favorites (user_id, post_url, group_id)
+        INSERT OR IGNORE INTO favorites (user_id, post_url, group_id)
         VALUES (?, ?, ?)
     """, (user_id, post_url, group_id))
     conn.commit()
@@ -141,9 +142,6 @@ def get_recent_posts_for_group(group_id, days=7):
     posts = cursor.fetchall()
     conn.close()
     return posts
-
-
-# 🔽 Новые функции для парсинга актуальных постов избранных групп
 
 def get_favorite_group_ids():
     conn = sqlite3.connect(DB_PATH)
@@ -182,3 +180,15 @@ def get_latest_favorite_posts(limit=10):
     result = cursor.fetchall()
     conn.close()
     return result
+
+# Для отладки (необязательно)
+def list_tables():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    tables = cursor.fetchall()
+    conn.close()
+    return [t[0] for t in tables]
+
+if __name__ == "__main__":
+    init_db()

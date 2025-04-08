@@ -1,4 +1,3 @@
-#vk_parser.py
 import requests
 import time
 import re
@@ -84,26 +83,25 @@ def get_group_posts(group_id):
     try:
         res = requests.get(url, params=params).json()
         posts = res.get("response", {}).get("items", [])
-        fresh_posts = []
+        result = []
         fourteen_days_ago = datetime.now() - timedelta(days=14)
 
         for post in posts:
             date_unix = post.get("date")
             text = post.get("text", "")
+            post_id = post.get("id")
             if date_unix and text and len(text) > 50:
                 post_date = datetime.fromtimestamp(date_unix)
                 if post_date > fourteen_days_ago:
-                    fresh_posts.append(text)
+                    result.append({"id": post_id, "date": date_unix, "text": text})
 
-        # Если нет свежих — добавляем последний с пометкой
-        if not fresh_posts and posts:
+        if not result and posts:
             latest_post = posts[0]
             last_text = latest_post.get("text", "")[:400]
-            if last_text:
-                last_date = datetime.fromtimestamp(latest_post["date"]).strftime("%d.%m.%Y")
-                return [f"(неактивно, последний пост: {last_date})\n\n{last_text}"]
+            last_date = latest_post.get("date")
+            return [{"id": latest_post.get("id"), "date": last_date, "text": f"(неактивно)\n{last_text}"}]
 
-        return fresh_posts
+        return result
 
     except Exception as e:
         print(f"⚠️ Ошибка при получении постов группы {group_id}: {e}")
@@ -169,13 +167,3 @@ def search_vk_groups(city_name):
         time.sleep(1)
 
     print(f"✅ [VK] Город {city_name} обработан за {time.time() - start:.2f} сек")
-
-def run_parser():
-    print("Парсер работает")
-    # Здесь можно указать нужные города
-    cities = ["Новосибирск"]  # добавь свои города
-    for city in cities:
-        search_vk_groups(city)
-
-if __name__ == "__main__":
-    run_parser()

@@ -1,5 +1,5 @@
 import sqlite3
-from vk_parser import get_group_posts  # ты уже это используешь
+from vk_parser import get_group_posts
 from datetime import datetime, timedelta
 
 DB_PATH = "shelters.db"
@@ -53,6 +53,3 @@ def update_favorite_posts():
 
         except Exception as e:
             print(f"[!] Ошибка при обработке группы {group_id}: {e}")
-
-if __name__ == "__main__":
-    update_favorite_posts()
