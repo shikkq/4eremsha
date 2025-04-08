@@ -53,3 +53,5 @@ async def on_startup():
         print(f"✅ Webhook установлен: {webhook_url}")
     else:
         print("❌ Не задан RENDER_EXTERNAL_URL")
+
+print(f"🌐 Starting app on port: {os.environ.get('PORT')}")
