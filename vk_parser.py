@@ -150,13 +150,14 @@ def search_vk_groups(city_name):
         params = {
             "access_token": VK_TOKEN,
             "q": f"{keyword} {city_name}",
-            "count": 20,
+            "count": 40,  # увеличим до 40, чтобы охватить больше вариантов
             "sort": 0,
             "city_id": city_id,
             "v": VK_API_VERSION
         }
         res = requests.get(url, params=params).json()
         groups = res.get("response", {}).get("items", [])
+        print(f"🔎 Найдено групп по запросу '{keyword} {city_name}': {len(groups)}")
 
         for group in groups:
             if group["is_closed"] != 0:
@@ -166,9 +167,11 @@ def search_vk_groups(city_name):
             group_key = f"vk_{group_id}"
             group_name = group["name"]
             group_link = f"https://vk.com/{group['screen_name']}"
-
             lowered_name = group_name.lower()
-            if not any(kw in lowered_name for kw in ["приют", "волонт", "животн", "кошк", "собак", "хвост"]):
+            description = group.get("description", "").lower()
+
+            # Новый фильтр: ищем ключевые слова и в названии, и в описании
+            if not any(kw in lowered_name or kw in description for kw in ["приют", "волонт", "животн", "кошк", "собак", "хвост", "зоо", "спас"]):
                 print(f"⛔ Группа '{group_name}' не похожа на приют — пропускаем.")
                 continue
 
