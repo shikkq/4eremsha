@@ -41,6 +41,7 @@ def extract_info_from_posts(posts_texts):
     info_lines = []
     contacts = set()
     addresses = set()
+    keyword_contexts = []
     last_date = None
     score = 0
 
@@ -60,6 +61,12 @@ def extract_info_from_posts(posts_texts):
         has_contacts = bool(re.search(r"\+7[\d\- ]{10,15}|\b8[\d\- ]{9,15}|[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+|https?://[^\s]+", text))
         has_address = any(kw in lowered for kw in ["ул.", "улица", "проспект", "по адресу", "двор", "встреча в", "место встречи"])
 
+        for kw in VK_KEYWORDS:
+            if kw.lower() in lowered:
+                match = re.search(rf".{{0,30}}{re.escape(kw.lower())}.{{0,30}}", lowered)
+                if match:
+                    keyword_contexts.append(f"...{match.group(0)}...")
+
         if has_needs:
             info_lines.append(text[:400])
         if has_contacts:
@@ -77,7 +84,7 @@ def extract_info_from_posts(posts_texts):
             score += 1
 
         if score >= 5:
-            break  # Достаточно информации
+            break
 
     if score < 5:
         print(f"⚠️ Недостаточно информации (score={score}) — пропускаем.")
@@ -90,6 +97,8 @@ def extract_info_from_posts(posts_texts):
         result += "\n📞 Контакты:\n" + "\n".join(contacts) + "\n"
     if addresses:
         result += "\n📍 Адрес или место:\n" + "\n".join(addresses) + "\n"
+    if keyword_contexts:
+        result += "\n🔍 Ключевые слова в контексте:\n" + "\n".join(keyword_contexts) + "\n"
 
     if not contacts or not addresses:
         result += "\n⚠️ Пост может быть неполным — проверьте информацию вручную.\n"
@@ -144,60 +153,74 @@ def search_vk_groups(city_name):
         return
 
     total_processed = 0
+    total_groups_checked = 0
 
     for keyword in VK_KEYWORDS:
-        url = "https://api.vk.com/method/groups.search"
-        params = {
-            "access_token": VK_TOKEN,
-            "q": f"{keyword} {city_name}",
-            "count": 40,  # увеличим до 40, чтобы охватить больше вариантов
-            "sort": 0,
-            "city_id": city_id,
-            "v": VK_API_VERSION
-        }
-        res = requests.get(url, params=params).json()
-        groups = res.get("response", {}).get("items", [])
-        print(f"🔎 Найдено групп по запросу '{keyword} {city_name}': {len(groups)}")
+        offset = 0
+        while total_processed < 10:
+            url = "https://api.vk.com/method/groups.search"
+            params = {
+                "access_token": VK_TOKEN,
+                "q": f"{keyword} {city_name}",
+                "count": 20,
+                "sort": 0,
+                "offset": offset,
+                "city_id": city_id,
+                "v": VK_API_VERSION
+            }
+            res = requests.get(url, params=params).json()
+            groups = res.get("response", {}).get("items", [])
 
-        for group in groups:
-            if group["is_closed"] != 0:
-                continue
+            if not groups:
+                break
 
-            group_id = group["id"]
-            group_key = f"vk_{group_id}"
-            group_name = group["name"]
-            group_link = f"https://vk.com/{group['screen_name']}"
-            lowered_name = group_name.lower()
-            description = group.get("description", "").lower()
+            for group in groups:
+                total_groups_checked += 1
 
-            # Новый фильтр: ищем ключевые слова и в названии, и в описании
-            if not any(kw in lowered_name or kw in description for kw in ["приют", "волонт", "животн", "кошк", "собак", "хвост", "зоо", "спас"]):
-                print(f"⛔ Группа '{group_name}' не похожа на приют — пропускаем.")
-                continue
+                if group["is_closed"] != 0:
+                    continue
 
-            print(f"🔹 {group_name}")
+                group_id = group["id"]
+                group_key = f"vk_{group_id}"
+                group_name = group["name"]
+                group_link = f"https://vk.com/{group['screen_name']}"
 
-            post_texts = get_group_posts(group_id)
-            if not post_texts:
-                print("⚠️ Нет постов — пропускаем.")
-                continue
+                if group_key in parsed_groups:
+                    continue
 
-            info = extract_info_from_posts(post_texts)
-            if not info:
-                print("⚠️ Посты не содержат нужной информации — пропускаем.")
-                continue
+                lowered_name = group_name.lower()
+                looks_like_shelter = any(kw in lowered_name for kw in ["приют", "волонт", "животн", "кошк", "собак", "хвост"])
 
-            add_shelter(group_key, group_name, group_link, city_name, info)
+                if not looks_like_shelter:
+                    print(f"⛔ Группа '{group_name}' не похожа на приют — пропускаем.")
+                    continue
 
-            if group_key not in parsed_groups:
+                print(f"🔹 Проверяем: {group_name}")
+                post_texts = get_group_posts(group_id)
+                time.sleep(0.34)
+
+                if not post_texts:
+                    print("⚠️ Нет постов — пропускаем.")
+                    continue
+
+                info = extract_info_from_posts(post_texts)
+                if not info:
+                    print("⚠️ Посты не содержат нужной информации — пропускаем.")
+                    continue
+
+                add_shelter(group_key, group_name, group_link, city_name, info)
+
                 parsed_groups.add(group_key)
                 save_cache()
+                total_processed += 1
+                print(f"✅ Добавлен [{total_processed}/10]")
 
-            total_processed += 1
-            print(f"✅ Добавлен [{total_processed}/10]")
+                if total_processed >= 10:
+                    break
 
-            if total_processed >= 10:
-                print("📦 Достигнут лимит в 10 групп.")
+            offset += 20
+            if offset > 1000:  # Ограничим цикл, чтобы не зависнуть
                 break
 
     print(f"✅ [VK] Город {city_name} обработан за {time.time() - start:.2f} сек")
+    print(f"🔍 Всего проверено групп: {total_groups_checked}")
