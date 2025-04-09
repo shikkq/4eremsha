@@ -37,28 +37,34 @@ def get_city_id(city_name):
     items = res.get("response", {}).get("items", [])
     return items[0]["id"] if items else None
 
+def contains_keywords(text):
+    lowered = text.lower()
+    return any(kw.lower() in lowered for kw in VK_KEYWORDS)
+
 def extract_info_from_posts(posts_texts):
-    info_lines = []
-    contacts = set()
-    addresses = set()
-    keyword_contexts = []
-    last_date = None
-    score = 0
+    keyword_found = False
+    best_info = None
+    best_score = 0
 
     for post in posts_texts:
-        text = post.get("text") if isinstance(post, dict) else post
-        if not isinstance(text, str):
+        text = post.get("text", "")
+        lowered = text.lower()
+
+        if not contains_keywords(text):
             continue
 
-        lowered = text.lower()
-        post_date_unix = post.get("date")
-        if post_date_unix:
-            last_date = datetime.fromtimestamp(post_date_unix).strftime("%d.%m.%Y")
+        keyword_found = True
+        score = 0
+        contacts = set()
+        addresses = set()
+        info_lines = []
+        keyword_contexts = []
 
-        print(f"\n🔸 Пост от {last_date}:\n{text[:300]}...\n")
+        post_date_unix = post.get("date")
+        last_date = datetime.fromtimestamp(post_date_unix).strftime("%d.%m.%Y") if post_date_unix else "неизвестно"
 
         has_needs = any(kw in lowered for kw in ["нужны", "срочно", "сбор", "помочь", "волонтёры", "приходите", "ждём"])
-        has_contacts = bool(re.search(r"\+7[\d\- ]{10,15}|\b8[\d\- ]{9,15}|[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+|https?://[^\s]+", text))
+        has_contacts = bool(re.search(r"\+7[\d\- ]{10,15}|\b8[\d\- ]{9,15}|[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\\.[a-zA-Z0-9-.]+|https?://[^\s]+", text))
         has_address = any(kw in lowered for kw in ["ул.", "улица", "проспект", "по адресу", "двор", "встреча в", "место встречи"])
 
         for kw in VK_KEYWORDS:
@@ -68,42 +74,46 @@ def extract_info_from_posts(posts_texts):
                     keyword_contexts.append(f"...{match.group(0)}...")
 
         if has_needs:
+            score += 3
             info_lines.append(text[:400])
         if has_contacts:
             score += 2
             phones = re.findall(r"\+7[\d\- ]{10,15}|\b8[\d\- ]{9,15}", text)
-            emails = re.findall(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", text)
+            emails = re.findall(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\\.[a-zA-Z0-9-.]+", text)
             urls = re.findall(r"https?://[^\s]+", text)
             contacts.update(phones + emails + urls)
         if has_address:
             score += 2
             addresses.add(text[:300])
-        if has_needs:
-            score += 3
         if any(kw in lowered for kw in ["приют", "животн", "собак", "кошк", "хвост", "волонт"]):
             score += 1
 
-        if score >= 5:
-            break
+        if score >= best_score:
+            best_score = score
+            result = f"\U0001F4C5 Дата поста: {last_date}\n\n"
+            if info_lines:
+                result += "\U0001F4CC Что нужно:\n" + "\n".join(info_lines[:2]) + "\n"
+            if contacts:
+                result += "\n\U0001F4DE Контакты:\n" + "\n".join(contacts) + "\n"
+            if addresses:
+                result += "\n\U0001F4CD Адрес или место:\n" + "\n".join(addresses) + "\n"
+            if keyword_contexts:
+                result += "\n\U0001F50D Ключевые слова в контексте:\n" + "\n".join(keyword_contexts) + "\n"
 
-    if score < 5:
-        print(f"⚠️ Недостаточно информации (score={score}) — пропускаем.")
+            if not contacts or not addresses:
+                result += "\n⚠️ Пост может быть неполным — проверьте информацию вручную.\n"
+
+            best_info = result.strip()
+
+    if not keyword_found:
+        print("❌ В постах нет ключевых слов — пропускаем.")
         return None
 
-    result = f"🗓 Дата поста: {last_date}\n\n"
-    if info_lines:
-        result += "📌 Что нужно:\n" + "\n".join(info_lines[:2]) + "\n"
-    if contacts:
-        result += "\n📞 Контакты:\n" + "\n".join(contacts) + "\n"
-    if addresses:
-        result += "\n📍 Адрес или место:\n" + "\n".join(addresses) + "\n"
-    if keyword_contexts:
-        result += "\n🔍 Ключевые слова в контексте:\n" + "\n".join(keyword_contexts) + "\n"
+    if best_score < 5:
+        print(f"⚠️ Недостаточно баллов (score={best_score}) — пропускаем.")
+        return None
 
-    if not contacts or not addresses:
-        result += "\n⚠️ Пост может быть неполным — проверьте информацию вручную.\n"
-
-    return result.strip()
+    return best_info
 
 def get_group_posts(group_id):
     url = "https://api.vk.com/method/wall.get"
@@ -146,7 +156,7 @@ def get_group_posts(group_id):
 def search_vk_groups(city_name):
     start = time.time()
     print(f"\n🔍 [VK] Начинаю парсинг города: {city_name}")
-    
+
     city_id = get_city_id(city_name)
     if not city_id:
         print(f"❌ Город '{city_name}' не найден.")
@@ -191,19 +201,14 @@ def search_vk_groups(city_name):
                 group_name = group["name"]
                 lowered_name = group_name.lower()
 
-                # Исключаем по кэшу
                 if group_key in parsed_groups:
                     continue
 
-                # Явно не приют — отбрасываем по ключевым словам
                 if any(x in lowered_name for x in exclusion_keywords):
-                    print(f"⛔ Группа '{group_name}' — не по теме (например, спорт или реклама) — пропускаем.")
+                    print(f"⛔ Группа '{group_name}' — не по теме — пропускаем.")
                     continue
 
-                # Проверка на ключевые слова, указывающие на приют
-                looks_like_shelter = any(kw in lowered_name for kw in ["приют", "волонт", "животн", "кошк", "собак", "хвост"])
-
-                if not looks_like_shelter:
+                if not any(kw in lowered_name for kw in ["приют", "волонт", "животн", "кошк", "собак", "хвост"]):
                     print(f"⛔ Группа '{group_name}' не похожа на приют — пропускаем.")
                     continue
 
