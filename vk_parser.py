@@ -42,6 +42,7 @@ def extract_info_from_posts(posts_texts):
     contacts = set()
     addresses = set()
     last_date = None
+    score = 0
 
     for post in posts_texts:
         text = post.get("text") if isinstance(post, dict) else post
@@ -53,30 +54,46 @@ def extract_info_from_posts(posts_texts):
         if post_date_unix:
             last_date = datetime.fromtimestamp(post_date_unix).strftime("%d.%m.%Y")
 
+        # Нужды
         if any(kw in lowered for kw in ["нужны", "срочно", "сбор", "помочь", "волонтёры", "приходите", "ждём"]):
             info_lines.append(text[:400])
+            score += 3
 
+        # Контакты
         phones = re.findall(r"\+7[\d\- ]{10,15}|\b8[\d\- ]{9,15}", text)
-        contacts.update(phones)
-
         emails = re.findall(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", text)
-        contacts.update(emails)
-
         urls = re.findall(r"https?://[^\s]+", text)
-        contacts.update(urls)
+        if phones or emails or urls:
+            contacts.update(phones + emails + urls)
+            score += 2
 
+        # Адрес
         if any(kw in lowered for kw in ["ул.", "улица", "проспект", "по адресу", "двор", "встреча в", "место встречи"]):
             addresses.add(text[:300])
+            score += 2
 
-    if not info_lines or not contacts or not addresses:
-        return None  # Пропускаем, если одного из пунктов не хватает
+        # Общие ключевые слова
+        if any(kw in lowered for kw in ["приют", "животн", "собак", "кошк", "хвост", "волонт"]):
+            score += 1
+
+    if score < 5:
+        print(f"   ⚠️ Слишком низкий рейтинг постов: {score}/10, пропускаем.")
+        return None
 
     result = ""
     if last_date:
         result += f"🗓 Дата поста: {last_date}\n\n"
-    result += "📌 Что нужно:\n" + "\n".join(info_lines[:3]) + "\n"
-    result += "\n📞 Контакты:\n" + "\n".join(contacts) + "\n"
-    result += "\n📍 Адрес или место:\n" + "\n".join(addresses) + "\n"
+
+    if info_lines:
+        result += "📌 Что нужно:\n" + "\n".join(info_lines[:3]) + "\n"
+    if contacts:
+        result += "\n📞 Контакты:\n" + "\n".join(contacts) + "\n"
+    if addresses:
+        result += "\n📍 Адрес или место:\n" + "\n".join(addresses) + "\n"
+
+    # Предупреждение, если нет адреса или контактов
+    if not contacts or not addresses:
+        result += "\n⚠️ Пост может быть неполным — проверьте информацию вручную.\n"
 
     return result.strip()
 
