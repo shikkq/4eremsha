@@ -17,6 +17,20 @@ user_city: dict[int, str] = {}
 
 @dp.message(Command("start"))
 async def start_handler(message: Message):
+    shelters = get_shelters_for_default_city()  # предположим, что ты заранее получаешь приюты по дефолтному городу
+
+    if not shelters:
+        await message.answer(
+            "⚠️ В этом городе пока нет подходящих приютов. Попробуем найти свежую информацию позже.",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[
+                    [KeyboardButton(text="Другой город")]
+                ],
+                resize_keyboard=True
+            )
+        )
+        return
+
     buttons = [[KeyboardButton(text=city)] for city in CITIES]
     buttons.append([KeyboardButton(text="Другой город")])
     keyboard = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)

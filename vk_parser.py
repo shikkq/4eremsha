@@ -155,6 +155,12 @@ def search_vk_groups(city_name):
     total_processed = 0
     total_groups_checked = 0
 
+    exclusion_keywords = [
+        "бизнес", "спорт", "фитнес", "тренировка", "новости", "курсы", "танцы", "йога", "бассейн", "школа", "садик",
+        "грузчики", "аренда", "натяжные потолки", "ремонт", "интернет", "доставка", "тренинги", "автошкола", "парикмахерская",
+        "тату", "психолог", "обучение", "репетитор", "библиотека", "театр", "баскетбол", "футбол", "волейбол", "шахматы"
+    ]
+
     for keyword in VK_KEYWORDS:
         offset = 0
         while total_processed < 10:
@@ -183,12 +189,18 @@ def search_vk_groups(city_name):
                 group_id = group["id"]
                 group_key = f"vk_{group_id}"
                 group_name = group["name"]
-                group_link = f"https://vk.com/{group['screen_name']}"
+                lowered_name = group_name.lower()
 
+                # Исключаем по кэшу
                 if group_key in parsed_groups:
                     continue
 
-                lowered_name = group_name.lower()
+                # Явно не приют — отбрасываем по ключевым словам
+                if any(x in lowered_name for x in exclusion_keywords):
+                    print(f"⛔ Группа '{group_name}' — не по теме (например, спорт или реклама) — пропускаем.")
+                    continue
+
+                # Проверка на ключевые слова, указывающие на приют
                 looks_like_shelter = any(kw in lowered_name for kw in ["приют", "волонт", "животн", "кошк", "собак", "хвост"])
 
                 if not looks_like_shelter:
@@ -196,6 +208,7 @@ def search_vk_groups(city_name):
                     continue
 
                 print(f"🔹 Проверяем: {group_name}")
+                group_link = f"https://vk.com/{group['screen_name']}"
                 post_texts = get_group_posts(group_id)
                 time.sleep(0.34)
 
@@ -209,7 +222,6 @@ def search_vk_groups(city_name):
                     continue
 
                 add_shelter(group_key, group_name, group_link, city_name, info)
-
                 parsed_groups.add(group_key)
                 save_cache()
                 total_processed += 1
@@ -219,7 +231,7 @@ def search_vk_groups(city_name):
                     break
 
             offset += 20
-            if offset > 1000:  # Ограничим цикл, чтобы не зависнуть
+            if offset > 1000:
                 break
 
     print(f"✅ [VK] Город {city_name} обработан за {time.time() - start:.2f} сек")
