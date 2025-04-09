@@ -14,7 +14,6 @@ VK_KEYWORDS = os.getenv("VK_KEYWORDS", "").split(",")
 VK_API_VERSION = "5.199"
 CACHE_FILE = "parsed_groups.json"
 
-# Загрузка кэша
 if os.path.exists(CACHE_FILE):
     with open(CACHE_FILE, "r", encoding="utf-8") as f:
         parsed_groups = set(json.load(f))
@@ -42,14 +41,17 @@ def extract_info_from_posts(posts_texts):
     info_lines = []
     contacts = set()
     addresses = set()
+    last_date = None
 
     for post in posts_texts:
-        # Извлекаем текст из словаря, если он есть
         text = post.get("text") if isinstance(post, dict) else post
         if not isinstance(text, str):
-            continue  # Пропустить, если не строка
+            continue
 
         lowered = text.lower()
+        post_date_unix = post.get("date")
+        if post_date_unix:
+            last_date = datetime.fromtimestamp(post_date_unix).strftime("%d.%m.%Y")
 
         if any(kw in lowered for kw in ["нужны", "срочно", "сбор", "помочь", "волонтёры", "приходите", "ждём"]):
             info_lines.append(text[:400])
@@ -66,16 +68,17 @@ def extract_info_from_posts(posts_texts):
         if any(kw in lowered for kw in ["ул.", "улица", "проспект", "по адресу", "двор", "встреча в", "место встречи"]):
             addresses.add(text[:300])
 
+    if not info_lines or not contacts or not addresses:
+        return None  # Пропускаем, если одного из пунктов не хватает
+
     result = ""
-    if info_lines:
-        result += "📌 Что нужно:\n" + "\n".join(info_lines[:3]) + "\n"
-    if contacts:
-        result += "\n📞 Контакты:\n" + "\n".join(contacts) + "\n"
-    if addresses:
-        result += "\n📍 Адрес или место:\n" + "\n".join(addresses) + "\n"
+    if last_date:
+        result += f"🗓 Дата поста: {last_date}\n\n"
+    result += "📌 Что нужно:\n" + "\n".join(info_lines[:3]) + "\n"
+    result += "\n📞 Контакты:\n" + "\n".join(contacts) + "\n"
+    result += "\n📍 Адрес или место:\n" + "\n".join(addresses) + "\n"
 
     return result.strip()
-
 
 def get_group_posts(group_id):
     url = "https://api.vk.com/method/wall.get"
@@ -103,9 +106,11 @@ def get_group_posts(group_id):
 
         if not result and posts:
             latest_post = posts[0]
-            last_text = latest_post.get("text", "")[:400]
-            last_date = latest_post.get("date")
-            return [{"id": latest_post.get("id"), "date": last_date, "text": f"(неактивно)\n{last_text}"}]
+            return [{
+                "id": latest_post.get("id"),
+                "date": latest_post.get("date"),
+                "text": f"(неактивно)\n{latest_post.get('text', '')[:400]}"
+            }]
 
         return result
 
@@ -144,6 +149,11 @@ def search_vk_groups(city_name):
                 group_name = group["name"]
                 group_link = f"https://vk.com/{group['screen_name']}"
 
+                # Исключаем неподходящие группы по ключевым словам
+                lowered_name = group_name.lower()
+                if not any(kw in lowered_name for kw in ["приют", "волонт", "животн", "кошк", "собак", "хвост"]):
+                    continue
+
                 print(f"   🔹 {group_name}")
 
                 post_texts = get_group_posts(group_id)
@@ -153,10 +163,9 @@ def search_vk_groups(city_name):
 
                 info = extract_info_from_posts(post_texts)
                 if not info:
-                    print("   ⚠️ Нет полезной информации, пропускаем.")
+                    print("   ⚠️ Посты без нужной информации, пропускаем.")
                     continue
 
-                # Добавление в базу и учёт в лимит
                 add_shelter(group_key, group_name, group_link, city_name, info)
 
                 if group_key not in parsed_groups:
@@ -169,6 +178,5 @@ def search_vk_groups(city_name):
                 if total_processed >= 10:
                     print("📦 Достигнут лимит в 10 групп.")
                     break
-
 
     print(f"✅ [VK] Город {city_name} обработан за {time.time() - start:.2f} сек")

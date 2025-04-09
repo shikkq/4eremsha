@@ -8,6 +8,7 @@ from database import (
     init_db, get_shelters_for_city, add_favorite,
     get_user_favorites, get_recent_posts_for_group
 )
+import asyncio
 
 init_db()
 dp = Dispatcher()
@@ -20,6 +21,20 @@ async def start_handler(message: Message):
     buttons.append([KeyboardButton(text="Другой город")])
     keyboard = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
     await message.answer("Привет! Выберите город, чтобы найти приюты, которым нужна помощь:", reply_markup=keyboard)
+
+@dp.message(Command("help"))
+async def help_handler(message: Message):
+    await message.answer("👋 Я бот, помогающий волонтёрам находить приюты и посты с нуждами.\n\n"
+                         "📌 /start — выбрать город\n"
+                         "⭐ /favorites — ваши избранные посты\n"
+                         "ℹ️ /about — узнать о проекте\n"
+                         "❓ /help — список команд")
+
+@dp.message(Command("about"))
+async def about_handler(message: Message):
+    await message.answer("🐾 Этот бот — часть школьного социального проекта. Он помогает волонтёрам находить приюты, "
+                         "которым нужна помощь, и отслеживать актуальные посты. Парсинг осуществляется с ВКонтакте.\n\n"
+                         "Проект некоммерческий 💙")
 
 @dp.message(lambda m: m.text in CITIES or m.text == "Другой город")
 async def handle_city_choice(message: Message):
@@ -41,20 +56,38 @@ async def handle_custom_city(message: Message):
 
 async def show_shelters(message: Message, city: str):
     shelters = get_shelters_for_city(city)
+
     if not shelters:
-        await message.answer("К сожалению, ничего не найдено.")
-        return
-    for shelter in shelters:
-        text = f"<b>{shelter[1]}</b>\n\n{(shelter[4] or '')}\n\n🔗 {shelter[2]}"
-        text = text[:4093] + "..." if len(text) > 4096 else text
+        await message.answer("🔍 Приюты не найдены. Пробуем найти свежую информацию...")
         try:
-            button = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="⭐ В избранное", callback_data=f"fav|{shelter[0]}|{shelter[2]}")]
-            ])
-            await message.answer(text, reply_markup=button, parse_mode="HTML")
+            from vk_parser import search_vk_groups
+            await asyncio.to_thread(search_vk_groups, city)
+            await asyncio.sleep(2)
         except Exception as e:
-            await message.answer("⚠️ Не удалось отправить приют. Проблема с кнопкой.")
-            print("Ошибка при отправке приюта:", e)
+            await message.answer("⚠️ Произошла ошибка при попытке найти приюты.")
+            print("Ошибка парсинга:", e)
+
+        shelters = get_shelters_for_city(city)
+
+        if not shelters:
+            await message.answer("К сожалению, приютов не найдено.")
+            return
+
+    keyboard = InlineKeyboardMarkup()
+    for shelter in shelters:
+        shelter_id, name, url, _, info = shelter
+        keyboard.add(InlineKeyboardButton(text=name, callback_data=f"info_{shelter_id}"))
+
+    await message.answer("📋 Вот список найденных приютов:", reply_markup=keyboard)
+
+    # Добавим фильтры
+    filter_buttons = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🔧 Волонтёрство", callback_data="filter_volunteer"),
+            InlineKeyboardButton(text="📦 Сбор", callback_data="filter_collection"),
+        ]
+    ])
+    await message.answer("Вы также можете отфильтровать по типу нужды:", reply_markup=filter_buttons)
 
 @dp.callback_query(lambda c: c.data.startswith("info_"))
 async def show_info(callback: types.CallbackQuery):
@@ -64,9 +97,11 @@ async def show_info(callback: types.CallbackQuery):
     if row:
         name, link, info = row
         msg = f"<b>{name}</b>\n{link}\n\n{info or 'Нет описания.'}"
-        if len(msg) > 4096:
-            msg = msg[:4093] + "..."
-        await callback.message.answer(msg, parse_mode="HTML")
+        msg = msg[:4093] + "..." if len(msg) > 4096 else msg
+        button = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⭐ В избранное", callback_data=f"fav|{shelter_id}|{link}")]
+        ])
+        await callback.message.answer(msg, reply_markup=button, parse_mode="HTML")
     else:
         await callback.message.answer("Не удалось найти информацию.")
     await callback.answer()
@@ -100,26 +135,26 @@ async def handle_recent_posts(callback_query: types.CallbackQuery):
     if posts:
         for url, text in posts:
             msg = f"{text}\n\n🔗 {url}"
-            if len(msg) > 4096:
-                msg = msg[:4093] + "..."
+            msg = msg[:4093] + "..." if len(msg) > 4096 else msg
             await callback_query.message.answer(msg)
     else:
         await callback_query.message.answer("Нет свежих постов за последние 7 дней 😿")
     await callback_query.answer()
 
-@dp.message(lambda m: m.text in ["🔧 Волонтёрство", "📦 Сбор"])
-async def choose_filter(message: Message):
-    city = user_city.get(message.from_user.id)
-    if not city:
-        await message.answer("Сначала выберите или введите город.")
-        return
+@dp.callback_query(F.data.in_({"filter_volunteer", "filter_collection"}))
+async def handle_filter(callback: types.CallbackQuery):
     from database import get_filtered_shelters
-    selected_type = message.text
-    filtered = get_filtered_shelters(city, selected_type)
+    city = user_city.get(callback.from_user.id)
+    if not city:
+        await callback.message.answer("Сначала выберите или введите город.")
+        return
+    filter_type = "Волонтёрство" if callback.data == "filter_volunteer" else "Сбор"
+    filtered = get_filtered_shelters(city, f"📦 {filter_type}" if "Сбор" in filter_type else f"🔧 {filter_type}")
     if not filtered:
-        await message.answer("По этому фильтру ничего не найдено.")
+        await callback.message.answer("По этому фильтру ничего не найдено.")
         return
     keyboard = InlineKeyboardMarkup()
     for shelter_id, name in filtered[:10]:
         keyboard.add(InlineKeyboardButton(text=name, callback_data=f"info_{shelter_id}"))
-    await message.answer("Вот, что удалось найти:", reply_markup=keyboard)
+    await callback.message.answer("Вот, что удалось найти по фильтру:", reply_markup=keyboard)
+    await callback.answer()
