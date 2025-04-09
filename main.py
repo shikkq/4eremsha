@@ -1,3 +1,4 @@
+import uvicorn
 import os
 from dotenv import load_dotenv
 from threading import Thread
@@ -62,3 +63,9 @@ def run_parser_route():
         return {"error": str(e)}
 
 print(f"🌐 Starting app on port: {os.environ.get('PORT')}")
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8000))
+    print(f"🌐 Starting app on port: {port}")
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)

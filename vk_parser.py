@@ -54,44 +54,43 @@ def extract_info_from_posts(posts_texts):
         if post_date_unix:
             last_date = datetime.fromtimestamp(post_date_unix).strftime("%d.%m.%Y")
 
-        # Нужды
-        if any(kw in lowered for kw in ["нужны", "срочно", "сбор", "помочь", "волонтёры", "приходите", "ждём"]):
+        print(f"\n🔸 Пост от {last_date}:\n{text[:300]}...\n")
+
+        has_needs = any(kw in lowered for kw in ["нужны", "срочно", "сбор", "помочь", "волонтёры", "приходите", "ждём"])
+        has_contacts = bool(re.search(r"\+7[\d\- ]{10,15}|\b8[\d\- ]{9,15}|[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+|https?://[^\s]+", text))
+        has_address = any(kw in lowered for kw in ["ул.", "улица", "проспект", "по адресу", "двор", "встреча в", "место встречи"])
+
+        if has_needs:
             info_lines.append(text[:400])
-            score += 3
-
-        # Контакты
-        phones = re.findall(r"\+7[\d\- ]{10,15}|\b8[\d\- ]{9,15}", text)
-        emails = re.findall(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", text)
-        urls = re.findall(r"https?://[^\s]+", text)
-        if phones or emails or urls:
+        if has_contacts:
+            score += 2
+            phones = re.findall(r"\+7[\d\- ]{10,15}|\b8[\d\- ]{9,15}", text)
+            emails = re.findall(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", text)
+            urls = re.findall(r"https?://[^\s]+", text)
             contacts.update(phones + emails + urls)
+        if has_address:
             score += 2
-
-        # Адрес
-        if any(kw in lowered for kw in ["ул.", "улица", "проспект", "по адресу", "двор", "встреча в", "место встречи"]):
             addresses.add(text[:300])
-            score += 2
-
-        # Общие ключевые слова
+        if has_needs:
+            score += 3
         if any(kw in lowered for kw in ["приют", "животн", "собак", "кошк", "хвост", "волонт"]):
             score += 1
 
+        if score >= 5:
+            break  # Достаточно информации
+
     if score < 5:
-        print(f"   ⚠️ Слишком низкий рейтинг постов: {score}/10, пропускаем.")
+        print(f"⚠️ Недостаточно информации (score={score}) — пропускаем.")
         return None
 
-    result = ""
-    if last_date:
-        result += f"🗓 Дата поста: {last_date}\n\n"
-
+    result = f"🗓 Дата поста: {last_date}\n\n"
     if info_lines:
-        result += "📌 Что нужно:\n" + "\n".join(info_lines[:3]) + "\n"
+        result += "📌 Что нужно:\n" + "\n".join(info_lines[:2]) + "\n"
     if contacts:
         result += "\n📞 Контакты:\n" + "\n".join(contacts) + "\n"
     if addresses:
         result += "\n📍 Адрес или место:\n" + "\n".join(addresses) + "\n"
 
-    # Предупреждение, если нет адреса или контактов
     if not contacts or not addresses:
         result += "\n⚠️ Пост может быть неполным — проверьте информацию вручную.\n"
 
@@ -160,40 +159,42 @@ def search_vk_groups(city_name):
         groups = res.get("response", {}).get("items", [])
 
         for group in groups:
-            if group["is_closed"] == 0:
-                group_id = group["id"]
-                group_key = f"vk_{group_id}"
-                group_name = group["name"]
-                group_link = f"https://vk.com/{group['screen_name']}"
+            if group["is_closed"] != 0:
+                continue
 
-                # Исключаем неподходящие группы по ключевым словам
-                lowered_name = group_name.lower()
-                if not any(kw in lowered_name for kw in ["приют", "волонт", "животн", "кошк", "собак", "хвост"]):
-                    continue
+            group_id = group["id"]
+            group_key = f"vk_{group_id}"
+            group_name = group["name"]
+            group_link = f"https://vk.com/{group['screen_name']}"
 
-                print(f"   🔹 {group_name}")
+            lowered_name = group_name.lower()
+            if not any(kw in lowered_name for kw in ["приют", "волонт", "животн", "кошк", "собак", "хвост"]):
+                print(f"⛔ Группа '{group_name}' не похожа на приют — пропускаем.")
+                continue
 
-                post_texts = get_group_posts(group_id)
-                if not post_texts:
-                    print("   ⚠️ Нет подходящих постов, пропускаем.")
-                    continue
+            print(f"🔹 {group_name}")
 
-                info = extract_info_from_posts(post_texts)
-                if not info:
-                    print("   ⚠️ Посты без нужной информации, пропускаем.")
-                    continue
+            post_texts = get_group_posts(group_id)
+            if not post_texts:
+                print("⚠️ Нет постов — пропускаем.")
+                continue
 
-                add_shelter(group_key, group_name, group_link, city_name, info)
+            info = extract_info_from_posts(post_texts)
+            if not info:
+                print("⚠️ Посты не содержат нужной информации — пропускаем.")
+                continue
 
-                if group_key not in parsed_groups:
-                    parsed_groups.add(group_key)
-                    save_cache()
+            add_shelter(group_key, group_name, group_link, city_name, info)
 
-                total_processed += 1
-                print(f"   ✅ Добавлен [{total_processed}/10]")
+            if group_key not in parsed_groups:
+                parsed_groups.add(group_key)
+                save_cache()
 
-                if total_processed >= 10:
-                    print("📦 Достигнут лимит в 10 групп.")
-                    break
+            total_processed += 1
+            print(f"✅ Добавлен [{total_processed}/10]")
+
+            if total_processed >= 10:
+                print("📦 Достигнут лимит в 10 групп.")
+                break
 
     print(f"✅ [VK] Город {city_name} обработан за {time.time() - start:.2f} сек")
