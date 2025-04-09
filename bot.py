@@ -17,7 +17,7 @@ user_city: dict[int, str] = {}
 
 @dp.message(Command("start"))
 async def start_handler(message: Message):
-    shelters = get_shelters_for_default_city()  # предположим, что ты заранее получаешь приюты по дефолтному городу
+    shelters = get_shelters_for_city("Новосибирск")  # предположим, что ты заранее получаешь приюты по дефолтному городу
 
     if not shelters:
         await message.answer(
