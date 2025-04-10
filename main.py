@@ -1,7 +1,6 @@
-import uvicorn
 import os
-from dotenv import load_dotenv
 from threading import Thread
+from dotenv import load_dotenv
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -17,8 +16,9 @@ load_dotenv()
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "supersecret")
 RENDER_URL = os.getenv("RENDER_EXTERNAL_URL")
+PORT = int(os.getenv("PORT", "10000"))
 
-# Инициализация aiogram компонентов
+# Инициализация компонентов
 bot = Bot(token=TOKEN)
 storage = MemoryStorage()
 
@@ -30,20 +30,18 @@ async def lifespan(app: FastAPI):
         print(f"✅ Webhook установлен: {webhook_url}")
     else:
         print("❌ Не задан RENDER_EXTERNAL_URL")
-    yield  # тут может быть логика завершения (on shutdown)
+    yield  # On shutdown logic можно добавить здесь
 
-# Инициализация FastAPI
 app = FastAPI(lifespan=lifespan)
 
-# Webhook-обработчик
 @app.post(f"/webhook/{WEBHOOK_URL}")
 async def telegram_webhook(request: Request):
     try:
-        body = await request.body()
-        update = Update.model_validate_json(body.decode("utf-8"))
+        data = await request.json()
+        update = Update(**data)
         await dp.feed_update(bot, update)
     except Exception as e:
-        print(f"Ошибка обработки webhook: {e}")
+        print(f"[!] Ошибка обработки webhook: {e}")
     return {"status": "ok"}
 
 @app.get("/")
@@ -61,5 +59,3 @@ def run_parser_route():
         return {"status": "Парсинг запущен"}
     except Exception as e:
         return {"error": str(e)}
-
-print(f"🌐 Starting app on port: {os.environ.get('PORT')}")
