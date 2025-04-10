@@ -10,14 +10,18 @@ from database import (
 )
 import asyncio
 
+# Инициализируем базу данных
 init_db()
 dp = Dispatcher()
+
+# Дефолтный список городов (можно расширять)
 CITIES = ["Новосибирск"]
 user_city: dict[int, str] = {}
 
 @dp.message(Command("start"))
 async def start_handler(message: Message):
-    shelters = get_shelters_for_city("Новосибирск")  # предположим, что ты заранее получаешь приюты по дефолтному городу
+    # По умолчанию используем дефолтный город для первого запроса
+    shelters = get_shelters_for_city("Новосибирск")
 
     if not shelters:
         await message.answer(
@@ -31,6 +35,7 @@ async def start_handler(message: Message):
         )
         return
 
+    # Формируем кнопки для выбора города
     buttons = [[KeyboardButton(text=city)] for city in CITIES]
     buttons.append([KeyboardButton(text="Другой город")])
     keyboard = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
@@ -63,19 +68,30 @@ async def handle_city_choice(message: Message):
 
 @dp.message(lambda m: m.text and m.from_user.id in user_city and m.text not in CITIES)
 async def handle_custom_city(message: Message):
+    """
+    Обработчик для ввода произвольного города.
+    При получении названия города, сохраняем его для пользователя, выводим сообщение о поиске и запускаем функцию показа приютов.
+    """
     city = message.text.strip()
     user_city[message.from_user.id] = city
     await message.answer(f"Ищем приюты в городе {city}, подождите немного...")
     await show_shelters(message, city)
 
 async def show_shelters(message: Message, city: str):
+    """
+    Функция выводит найденные в базе приюты для указанного города.
+    Если приютов не найдено, вызывается функция парсинга из vk_parser для поиска свежей информации, после чего
+    повторно проверяется наличие приютов в базе.
+    """
     shelters = get_shelters_for_city(city)
 
     if not shelters:
         await message.answer("🔍 Приюты не найдены. Пробуем найти свежую информацию...")
         try:
             from vk_parser import search_vk_groups
+            # Запускаем функцию парсинга в отдельном потоке, чтобы не блокировать event loop
             await asyncio.to_thread(search_vk_groups, city)
+            # Ждём пару секунд для того, чтобы парсер успел обновить базу
             await asyncio.sleep(2)
         except Exception as e:
             await message.answer("⚠️ Произошла ошибка при попытке найти приюты.")
@@ -87,6 +103,7 @@ async def show_shelters(message: Message, city: str):
             await message.answer("К сожалению, приютов не найдено.")
             return
 
+    # Формируем разметку для вывода найденных приютов
     keyboard = InlineKeyboardMarkup()
     for shelter in shelters:
         shelter_id, name, url, _, info = shelter
@@ -94,7 +111,7 @@ async def show_shelters(message: Message, city: str):
 
     await message.answer("📋 Вот список найденных приютов:", reply_markup=keyboard)
 
-    # Добавим фильтры
+    # Добавляем кнопки-фильтры для типа нужды
     filter_buttons = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="🔧 Волонтёрство", callback_data="filter_volunteer"),
@@ -163,6 +180,7 @@ async def handle_filter(callback: types.CallbackQuery):
         await callback.message.answer("Сначала выберите или введите город.")
         return
     filter_type = "Волонтёрство" if callback.data == "filter_volunteer" else "Сбор"
+    # Формируем ключ фильтрации согласно логике отображения приютов
     filtered = get_filtered_shelters(city, f"📦 {filter_type}" if "Сбор" in filter_type else f"🔧 {filter_type}")
     if not filtered:
         await callback.message.answer("По этому фильтру ничего не найдено.")
