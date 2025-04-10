@@ -10,12 +10,10 @@ from database import add_shelter
 load_dotenv()
 
 VK_TOKEN = os.getenv("VK_TOKEN")
-# Основной список ключевых слов для поиска постов (ключевые слова для приютов и просьб о помощи)
 VK_KEYWORDS = os.getenv("VK_KEYWORDS", "приют,волонт,животн,кошк,собак,хвост,помощь,нужн,срочно,помогите,поддержка").split(",")
 VK_API_VERSION = "5.199"
 CACHE_FILE = "parsed_groups.json"
 
-# Загружаем кэш обработанных групп, чтобы не обрабатывать их повторно
 if os.path.exists(CACHE_FILE):
     with open(CACHE_FILE, "r", encoding="utf-8") as f:
         parsed_groups = set(json.load(f))
@@ -27,13 +25,10 @@ def save_cache():
         json.dump(list(parsed_groups), f)
 
 def get_city_id(city_name):
-    """
-    Получаем id города по его названию через VK API.
-    """
     url = "https://api.vk.com/method/database.getCities"
     params = {
         "access_token": VK_TOKEN,
-        "country_id": 1,  # Россия
+        "country_id": 1,
         "q": city_name,
         "count": 1,
         "v": VK_API_VERSION
@@ -43,36 +38,30 @@ def get_city_id(city_name):
     return items[0]["id"] if items else None
 
 def contains_keywords(text):
-    """
-    Проверяет, содержит ли текст хотя бы одно ключевое слово.
-    """
     lowered = text.lower()
     return any(kw.lower() in lowered for kw in VK_KEYWORDS)
 
 def contains_city(text, city_name):
-    """
-    Дополнительная проверка: упоминается ли город в тексте. Можно задавать разные варианты.
-    """
     lowered = text.lower()
     city_lower = city_name.lower()
-    # Простейшие варианты: "город <название>", "<название>" (но не как часть другого слова)
     if f"г. {city_lower}" in lowered:
         return True
-    # Проверяем, что слово встречается отдельно (используем \b для границ слова)
     if re.search(rf"\b{re.escape(city_lower)}\b", lowered):
         return True
     return False
 
+def normalize_contacts(contacts):
+    cleaned = set()
+    for contact in contacts:
+        normalized = re.sub(r"\s+", "", contact)
+        cleaned.add(normalized)
+    return cleaned
+
 def extract_info_from_posts(posts_texts, city_name):
-    """
-    Извлекает из списка постов наиболее релевантный пост с информацией о нуждах приюта.
-    Производит оценку поста по баллам с дополнительной проверкой на наличие упоминания города.
-    """
     keyword_found = False
     best_info = None
     best_score = 0
 
-    # Списки дополнительных ключевых слов
     help_keywords = ["нужны", "нужен", "нужная", "нужное", "помощь", "помогите", "срочно", "сбор", "поддержка"]
     contact_patterns = [
         r"\+7[\d\-\s]{10,15}",
@@ -80,7 +69,6 @@ def extract_info_from_posts(posts_texts, city_name):
         r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+",
         r"https?://[^\s]+"
     ]
-    # Шаблоны для адреса – увеличиваем диапазон проверок
     address_keywords = ["ул.", "улица", "проспект", "бульвар", "переулок", "по адресу", "двор", "место встречи", "адрес"]
 
     for post in posts_texts:
@@ -90,9 +78,7 @@ def extract_info_from_posts(posts_texts, city_name):
         if not contains_keywords(text):
             continue
 
-        # Если указан город, проверяем его наличие в посте
         if city_name and not contains_city(text, city_name):
-            # Если в посте не указан город, пропускаем (будем считать, что информация не релевантна по локации)
             continue
 
         keyword_found = True
@@ -103,38 +89,41 @@ def extract_info_from_posts(posts_texts, city_name):
         keyword_contexts = []
 
         post_date_unix = post.get("date")
-        last_date = datetime.fromtimestamp(post_date_unix).strftime("%d.%m.%Y") if post_date_unix else "неизвестно"
+        post_date = datetime.fromtimestamp(post_date_unix)
+        last_date = post_date.strftime("%d.%m.%Y") if post_date_unix else "неизвестно"
 
-        # Проверка на наличие ключевых слов, связанных с просьбой о помощи
+        # Проверка на неактивность
+        is_inactive = "(неактивно)" in text.lower()
+        if is_inactive:
+            score -= 2
+
         if any(kw in lowered for kw in help_keywords):
             score += 3
             info_lines.append(text[:400])
-        # Проверка наличия контактов в тексте
         for pattern in contact_patterns:
             found = re.findall(pattern, text)
             if found:
                 score += 2
                 contacts.update(found)
-        # Проверка наличия адресных данных
+        contacts = normalize_contacts(contacts)
+
         if any(kw in lowered for kw in address_keywords):
-            score += 2
-            addresses.add(text[:300])
-        # Дополнительное повышение баллов за упоминание тематики приюта/животных
+            snippet = text[:300]
+            if 10 < len(snippet) < 300:
+                addresses.add(snippet)
+                score += 2
+
         if any(kw in lowered for kw in ["приют", "животн", "собак", "кошк", "хвост", "волонт"]):
             score += 1
-
-        # Если город упоминается, добавляем небольшое повышение для уверенности
         if city_name and contains_city(text, city_name):
             score += 1
 
-        # Сохраняем контекст ключевых слов для анализа (по 30 символов до и после)
         for kw in VK_KEYWORDS:
             if kw.lower() in lowered:
                 match = re.search(rf".{{0,30}}{re.escape(kw.lower())}.{{0,30}}", lowered)
                 if match:
                     keyword_contexts.append(f"...{match.group(0)}...")
 
-        # Если баллов у поста больше или равны лучшему, обновляем лучший результат
         if score >= best_score:
             best_score = score
             result = f"\U0001F4C5 Дата поста: {last_date}\n\n"
@@ -155,8 +144,6 @@ def extract_info_from_posts(posts_texts, city_name):
     if not keyword_found:
         print("❌ В постах нет ключевых слов — пропускаем.")
         return None
-
-    # Требуем минимальный порог баллов для уверенности в релевантности поста.
     if best_score < 5:
         print(f"⚠️ Недостаточно баллов (score={best_score}) — пропускаем.")
         return None
@@ -164,10 +151,6 @@ def extract_info_from_posts(posts_texts, city_name):
     return best_info
 
 def get_group_posts(group_id):
-    """
-    Получает последние посты группы через VK API, ограничиваясь постами за последние 14 дней.
-    Если актуальных постов нет, возвращает самый последний пост с отметкой (неактивно).
-    """
     url = "https://api.vk.com/method/wall.get"
     params = {
         "access_token": VK_TOKEN,
@@ -206,20 +189,6 @@ def get_group_posts(group_id):
         return []
 
 def search_vk_groups(city_name):
-    """
-    Основная функция парсинга групп по указанному городу.
-    Выполняет поиск групп по запросу «<ключевое слово> <город>», фильтрует группы по теме приютов,
-    затем перебирает посты каждой группы, оценивает их и при наличии релевантного поста добавляет приют
-    в базу данных (через функцию add_shelter).
-    
-    Требования:
-      1. Искать информацию по городу (в запросе и в постах проверяется упоминание города).
-      2. Проверять только группы, релевантные приютам (сужение по ключевым словам и исключение не по теме).
-      3. Искать посты, содержащие просьбы о помощи с адресом и контактами.
-      4. Обрабатывать до 10 постов.
-      5. Оценивать посты по баллам для точного нахождения нужной информации.
-      6. Использовать расширенную базу ключевых слов, чтобы гарантированно находить нужные посты.
-    """
     start = time.time()
     print(f"\n🔍 [VK] Начинаю парсинг города: {city_name}")
 
@@ -231,14 +200,12 @@ def search_vk_groups(city_name):
     total_processed = 0
     total_groups_checked = 0
 
-    # Список ключевых слов, исключающих нерелевантные группы (расширен)
     exclusion_keywords = [
         "бизнес", "спорт", "фитнес", "тренировка", "новости", "курсы", "танцы", "йога", "бассейн", "школа", "садик",
         "грузчики", "аренда", "натяжные потолки", "ремонт", "интернет", "доставка", "тренинги", "автошкола", "парикмахерская",
         "тату", "психолог", "обучение", "репетитор", "библиотека", "театр", "баскетбол", "футбол", "волейбол", "шахматы", "пилатес"
     ]
 
-    # По каждому ключевому слову выполняем поиск, комбинируя с названием города
     for keyword in VK_KEYWORDS:
         offset = 0
         while total_processed < 10:
@@ -261,7 +228,6 @@ def search_vk_groups(city_name):
             for group in groups:
                 total_groups_checked += 1
 
-                # Обрабатываем только открытые группы
                 if group["is_closed"] != 0:
                     continue
 
@@ -273,12 +239,10 @@ def search_vk_groups(city_name):
                 if group_key in parsed_groups:
                     continue
 
-                # Исключаем группы с нежелательными ключевыми словами
                 if any(x in lowered_name for x in exclusion_keywords):
                     print(f"⛔ Группа '{group_name}' — не по теме — пропускаем.")
                     continue
 
-                # Фильтруем по тематике приютов: в названии должны присутствовать ключевые слова, связанные с приютами или животными
                 if not any(x in lowered_name for x in ["приют", "волонт", "животн", "кошк", "собак", "хвост"]):
                     print(f"⛔ Группа '{group_name}' не похожа на приют — пропускаем.")
                     continue
@@ -311,4 +275,3 @@ def search_vk_groups(city_name):
 
     print(f"✅ [VK] Город {city_name} обработан за {time.time() - start:.2f} сек")
     print(f"🔍 Всего проверено групп: {total_groups_checked}")
-

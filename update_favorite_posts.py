@@ -1,5 +1,5 @@
 import sqlite3
-from vk_parser import get_group_posts
+from vk_parser import get_group_posts, extract_info_from_posts
 from datetime import datetime, timedelta
 
 DB_PATH = "shelters.db"
@@ -10,7 +10,7 @@ def get_favorite_group_ids():
     c.execute("SELECT DISTINCT group_id FROM favorites")
     rows = c.fetchall()
     conn.close()
-    return [r[0] for r in rows]
+    return [r[0].replace("vk_", "") for r in rows if r[0].startswith("vk_")]
 
 def post_already_saved(post_url):
     conn = sqlite3.connect(DB_PATH)
@@ -24,32 +24,41 @@ def save_favorite_post(group_id, post_url, text):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("INSERT OR IGNORE INTO favorite_posts (group_id, post_url, text) VALUES (?, ?, ?)",
-              (group_id, post_url, text))
+              (f"vk_{group_id}", post_url, text))
     conn.commit()
     conn.close()
 
-def is_relevant(text):
-    text = text.lower()
-    keywords = ["волонтёр", "помощь", "приходите", "корм", "сбор", "лекарства", "деньги"]
-    return any(kw in text for kw in keywords)
-
 def update_favorite_posts():
     group_ids = get_favorite_group_ids()
+    print(f"🔄 Обновление избранных: {len(group_ids)} групп")
 
     for group_id in group_ids:
         try:
-            posts = get_group_posts(group_id, count=10)
-            for post in posts:
-                date = datetime.fromtimestamp(post['date'])
-                if datetime.now() - date > timedelta(days=2):
-                    continue
+            posts = get_group_posts(int(group_id))
+            recent_posts = [
+                post for post in posts
+                if datetime.now() - datetime.fromtimestamp(post['date']) < timedelta(days=2)
+            ]
 
-                text = post.get('text', '')
-                post_url = f"https://vk.com/wall-{group_id}_{post['id']}"
+            if not recent_posts:
+                print(f"⏳ В группе {group_id} нет свежих постов")
+                continue
 
-                if not post_already_saved(post_url) and is_relevant(text):
-                    save_favorite_post(group_id, post_url, text)
-                    print(f"Сохранён новый пост: {post_url}")
+            info = extract_info_from_posts(recent_posts, city_name="")
+            if info:
+                newest_post = max(recent_posts, key=lambda p: p["date"])
+                post_url = f"https://vk.com/wall-{group_id}_{newest_post['id']}"
+
+                if not post_already_saved(post_url):
+                    save_favorite_post(group_id, post_url, info)
+                    print(f"✅ Сохранён новый пост: {post_url}")
+                else:
+                    print(f"ℹ️ Уже сохранён: {post_url}")
+            else:
+                print(f"⚠️ Нет подходящей информации для группы {group_id}")
 
         except Exception as e:
             print(f"[!] Ошибка при обработке группы {group_id}: {e}")
+
+if __name__ == "__main__":
+    update_favorite_posts()

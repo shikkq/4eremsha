@@ -7,14 +7,15 @@ def init_db():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
 
-    # таблица приютов
+    # таблица приютов: добавлено поле post_date для хранения даты поста
     c.execute("""
         CREATE TABLE IF NOT EXISTS shelters (
             id TEXT PRIMARY KEY,
             name TEXT,
             link TEXT,
             city TEXT,
-            info TEXT
+            info TEXT,
+            post_date TEXT
         )
     """)
 
@@ -51,18 +52,26 @@ def init_db():
     conn.commit()
     conn.close()
 
-
-def add_shelter(id, name, link, city, info=""):
+def add_shelter(id, name, link, city, info="", post_date=""):
+    """
+    Добавляет запись о приюте в базу.
+    Если запись с таким id уже существует, она не перезаписывается.
+    """
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     try:
-        c.execute("INSERT INTO shelters VALUES (?, ?, ?, ?, ?)", (id, name, link, city, info))
+        c.execute("INSERT INTO shelters VALUES (?, ?, ?, ?, ?, ?)", (id, name, link, city, info, post_date))
         conn.commit()
     except sqlite3.IntegrityError:
         pass
     conn.close()
 
 def get_shelters_for_city(city, limit=20):
+    """
+    Возвращает список приютов для указанного города.
+    Если для города уже были показаны какие-либо приюты за последние 3 дня, выводятся именно они.
+    Иначе выбираются случайные записи.
+    """
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
@@ -106,6 +115,17 @@ def get_shelters_for_city(city, limit=20):
     conn.close()
     return result
 
+def get_shelter_by_id(shelter_id):
+    """
+    Возвращает запись по идентификатору приюта в виде кортежа:
+      (name, link, info, post_date)
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT name, link, info, post_date FROM shelters WHERE id = ?", (shelter_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return row
 
 def add_favorite(user_id, post_url, group_id):
     conn = sqlite3.connect(DB_PATH)
@@ -116,7 +136,6 @@ def add_favorite(user_id, post_url, group_id):
     """, (user_id, post_url, group_id))
     conn.commit()
     conn.close()
-
 
 def get_user_favorites(user_id):
     conn = sqlite3.connect(DB_PATH)
