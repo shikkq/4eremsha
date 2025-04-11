@@ -19,7 +19,7 @@ WEBHOOK_URL = os.getenv("WEBHOOK_URL", "supersecret")
 RENDER_URL = os.getenv("RENDER_EXTERNAL_URL")
 PORT = int(os.getenv("PORT", "10000"))
 
-# Пусть к файлу последнего запуска и минимальный интервал (30 мин)
+# Путь к файлу последнего запуска и минимальный интервал (30 мин)
 LAST_RUN_FILE = "last_run.txt"
 MIN_INTERVAL_SECONDS = 60 * 30  # 30 минут
 
@@ -34,8 +34,11 @@ storage = MemoryStorage()
 async def lifespan(app: FastAPI):
     if RENDER_URL:
         webhook_url = f"{RENDER_URL}/webhook/{WEBHOOK_URL}"
-        await bot.set_webhook(webhook_url)
-        print(f"✅ Webhook установлен: {webhook_url}")
+        try:
+            await bot.set_webhook(webhook_url)
+            print(f"✅ Webhook установлен: {webhook_url}")
+        except Exception as e:
+            print(f"[!] Ошибка установки webhook в lifespan: {e}")
     else:
         print("❌ Не задан RENDER_EXTERNAL_URL")
     yield  # Можно добавить логику при завершении
@@ -57,12 +60,12 @@ def root():
     return {"message": "Hello from FastAPI"}
 
 @app.get("/ping")
-def ping():
-    # Попытка обновить webhook (резерв) – чтобы бот точно "проснулся"
+async def ping():
+    # Обновляем webhook в фоновом режиме как резерв, не блокируя обработку запроса
     try:
         webhook_url = f"{RENDER_URL}/webhook/{WEBHOOK_URL}"
-        import asyncio
-        asyncio.run(bot.set_webhook(webhook_url))
+        # Создаем задачу для обновления вебхука
+        _ =  asyncio.create_task(bot.set_webhook(webhook_url))
     except Exception as e:
         print(f"Ошибка установки webhook в /ping: {e}")
     return {"pong": True}
@@ -94,7 +97,7 @@ def run_parser_route():
                 update_all_cities()
                 print("✅ Парсер завершил работу.")
 
-        # Запуск фонового потока
+        # Запуск фонового потока (daemon=True, чтобы поток завершался вместе с процессом)
         Thread(target=run_parser, daemon=True).start()
         return {"status": "Парсинг запущен"}
     except Exception as e:

@@ -12,11 +12,16 @@ from database import (
 import asyncio
 import re
 
+# Инициализация базы данных (если база уже существует — данные не удаляются)
 init_db()
 dp = Dispatcher()
 
+# Основной список предлагаемых городов
 CITIES = ["Новосибирск"]
+# Словарь для сохранения выбранного пользователем города: user_id -> city
 user_city: dict[int, str] = {}
+# Словарь для отслеживания последнего сообщения с информацией по приюту:
+# user_id -> message_id, чтобы удалять прошлое сообщение при выборе нового приюта
 user_last_msg: dict[int, int] = {}
 
 @dp.message(Command("start"))
@@ -69,6 +74,7 @@ async def handle_custom_city(message: Message):
     await show_shelters(message, city)
 
 async def show_shelters(message: Message, city: str):
+    # Получаем приюты из базы для указанного города
     shelters = get_shelters_for_city(city)
 
     if not shelters:
@@ -80,6 +86,7 @@ async def show_shelters(message: Message, city: str):
             await message.answer("⚠️ Произошла ошибка при попытке собрать информацию.")
             print("Ошибка парсинга:", e)
 
+        # Повторяем проверку каждые 2 секунды (до 10 секунд)
         for _ in range(5):
             await asyncio.sleep(2)
             shelters = get_shelters_for_city(city)
@@ -90,14 +97,17 @@ async def show_shelters(message: Message, city: str):
             await message.answer("Пока нет актуальной информации. Попробуйте позже.")
             return
 
+    # Формируем список inline-кнопок для найденных приютов
     buttons = []
     for shelter in shelters:
+        # Извлекаем id, name, url, info, дату поста (остальные поля)
         shelter_id, name, url, _, info, post_date = shelter
         buttons.append([InlineKeyboardButton(text=name, callback_data=f"info_{shelter_id}")])
     keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
 
     await message.answer("📋 Вот список найденных приютов:", reply_markup=keyboard)
 
+    # Дополнительные кнопки фильтрации по типу нужды
     filter_buttons = InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -109,6 +119,9 @@ async def show_shelters(message: Message, city: str):
     await message.answer("Вы также можете отфильтровать по типу нужды:", reply_markup=filter_buttons)
 
 def trim_to_sentence(text: str, limit: int = 4096) -> str:
+    """
+    Если текст превышает лимит, обрезает его до конца последнего полного предложения или абзаца.
+    """
     if len(text) <= limit:
         return text
     cutoff = text[:limit]
@@ -132,14 +145,13 @@ async def show_info(callback: types.CallbackQuery):
                 [InlineKeyboardButton(text="⭐ В избранное", callback_data=f"fav|{shelter_id}|{link}")]
             ]
         )
-
-        # удаляем предыдущее сообщение, если было
+        # Удаляем предыдущую информацию, если таковая уже была отправлена пользователю
         user_id = callback.from_user.id
         if user_id in user_last_msg:
             try:
                 await callback.message.bot.delete_message(callback.message.chat.id, user_last_msg[user_id])
-            except:
-                pass
+            except Exception as e:
+                print(f"Ошибка удаления предыдущего сообщения: {e}")
         sent_msg = await callback.message.answer(msg, reply_markup=button_markup, parse_mode="HTML")
         user_last_msg[user_id] = sent_msg.message_id
     else:
@@ -186,14 +198,12 @@ async def handle_filter(callback: types.CallbackQuery):
     if not city:
         await callback.message.answer("Сначала выберите или введите город.")
         return
-
     filter_type = "Волонтёрство" if callback.data == "filter_volunteer" else "Сбор"
     filtered = get_filtered_shelters(city, filter_type)
     if not filtered:
         await callback.message.answer("Пока нет записей по данному фильтру.")
         await callback.answer()
         return
-
     buttons = []
     for shelter_id, name in filtered[:10]:
         buttons.append([InlineKeyboardButton(text=name, callback_data=f"info_{shelter_id}")])
