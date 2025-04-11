@@ -1,5 +1,6 @@
 import os
-from threading import Thread
+import time
+from threading import Thread, Lock
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
 
@@ -18,6 +19,13 @@ WEBHOOK_URL = os.getenv("WEBHOOK_URL", "supersecret")
 RENDER_URL = os.getenv("RENDER_EXTERNAL_URL")
 PORT = int(os.getenv("PORT", "10000"))
 
+# Пусть к файлу последнего запуска и минимальный интервал (30 мин)
+LAST_RUN_FILE = "last_run.txt"
+MIN_INTERVAL_SECONDS = 60 * 30  # 30 минут
+
+# Глобальная блокировка для парсера
+parser_lock = Lock()
+
 # Инициализация компонентов
 bot = Bot(token=TOKEN)
 storage = MemoryStorage()
@@ -30,7 +38,7 @@ async def lifespan(app: FastAPI):
         print(f"✅ Webhook установлен: {webhook_url}")
     else:
         print("❌ Не задан RENDER_EXTERNAL_URL")
-    yield  # On shutdown logic можно добавить здесь
+    yield  # Можно добавить логику при завершении
 
 app = FastAPI(lifespan=lifespan)
 
@@ -50,12 +58,44 @@ def root():
 
 @app.get("/ping")
 def ping():
+    # Попытка обновить webhook (резерв) – чтобы бот точно "проснулся"
+    try:
+        webhook_url = f"{RENDER_URL}/webhook/{WEBHOOK_URL}"
+        import asyncio
+        asyncio.run(bot.set_webhook(webhook_url))
+    except Exception as e:
+        print(f"Ошибка установки webhook в /ping: {e}")
     return {"pong": True}
 
 @app.get("/run-parser")
 def run_parser_route():
     try:
-        Thread(target=update_all_cities).start()
+        now = time.time()
+
+        # Проверка времени последнего запуска через файл
+        if os.path.exists(LAST_RUN_FILE):
+            with open(LAST_RUN_FILE, "r") as f:
+                last_run = float(f.read().strip() or 0)
+            if now - last_run < MIN_INTERVAL_SECONDS:
+                return {"status": "Пропущено — парсер недавно запускался."}
+
+        # Зафиксировать время запуска
+        with open(LAST_RUN_FILE, "w") as f:
+            f.write(str(now))
+
+        # Если парсер уже запущен, не запускаем повторно
+        if parser_lock.locked():
+            return {"status": "Парсер уже запущен."}
+
+        # Функция-обёртка, запускающая парсер под блокировкой
+        def run_parser():
+            with parser_lock:
+                print("⏳ Парсер стартовал...")
+                update_all_cities()
+                print("✅ Парсер завершил работу.")
+
+        # Запуск фонового потока
+        Thread(target=run_parser, daemon=True).start()
         return {"status": "Парсинг запущен"}
     except Exception as e:
         return {"error": str(e)}

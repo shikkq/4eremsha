@@ -66,6 +66,20 @@ def add_shelter(id, name, link, city, info="", post_date=""):
         pass
     conn.close()
 
+def get_filtered_shelters(city: str, filter_keyword: str):
+    """
+    Возвращает приюты для указанного города, у которых в info встречается ключевое слово.
+    """
+    conn = sqlite3.connect("shelters.db")
+    c = conn.cursor()
+    c.execute(
+        "SELECT id, name FROM shelters WHERE city = ? AND info LIKE ?",
+        (city, f"%{filter_keyword}%")
+    )
+    results = c.fetchall()
+    conn.close()
+    return results
+
 def get_shelters_for_city(city, limit=20):
     """
     Возвращает список приютов для указанного города.
