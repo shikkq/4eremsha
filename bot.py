@@ -21,8 +21,7 @@ user_city: dict[int, str] = {}
 @dp.message(Command("start"))
 async def start_handler(message: Message):
     """
-    При /start бот только приветствует пользователя и предлагает выбрать или ввести город.
-    Не сообщаем о наличии/отсутствии данных.
+    При /start бот приветствует пользователя и предлагает выбрать или ввести город.
     """
     await message.answer(
         "Привет! Выберите город, чтобы найти приюты, которым нужна помощь:",
@@ -86,25 +85,28 @@ async def handle_custom_city(message: Message):
 async def show_shelters(message: Message, city: str):
     """
     Если в базе уже есть информация для указанного города, выводит её.
-    Если нет – сообщает: 
-      "📭 Информации по городу {city} пока нет. Ищем свежие данные"
-    Затем запускает парсер и повторно проверяет базу. Если по-прежнему нет данных – выводит сообщение,
-    что информации пока нет.
+    Если нет – сообщает, что информации пока нет, запускает парсер и в цикле обновляет данные.
+    Как только новые данные найдены, они выводятся пользователю.
     """
     shelters = get_shelters_for_city(city)
 
     if not shelters:
-        await message.answer(f"📭 Информации по городу {city} пока нет. Ищем свежие данные")
+        await message.answer(f"📭 Информации по городу {city} пока нет. Ищем свежие данные...")
         try:
             from vk_parser import search_vk_groups
-            # Запуск парсера в отдельном потоке, чтобы не блокировать event loop
+            # Запускаем парсер в отдельном потоке, чтобы не блокировать event loop
             await asyncio.to_thread(search_vk_groups, city)
-            await asyncio.sleep(2)
         except Exception as e:
             await message.answer("⚠️ Произошла ошибка при попытке собрать информацию.")
             print("Ошибка парсинга:", e)
 
-        shelters = get_shelters_for_city(city)
+        # Повторяем проверку базы каждые 2 секунды в течение 10 секунд (можно настроить)
+        for _ in range(5):
+            await asyncio.sleep(2)
+            shelters = get_shelters_for_city(city)
+            if shelters:
+                break
+
         if not shelters:
             await message.answer("Пока нет актуальной информации. Попробуйте позже.")
             return
@@ -112,13 +114,14 @@ async def show_shelters(message: Message, city: str):
     # Формируем список кнопок для найденных приютов
     buttons = []
     for shelter in shelters:
-        shelter_id, name, url, _, info = shelter
+        # Извлекаем id, name, ссылку и info; если есть поле post_date, его можно использовать дополнительно
+        shelter_id, name, url, _, info, post_date = shelter
         buttons.append([InlineKeyboardButton(text=name, callback_data=f"info_{shelter_id}")])
     keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
 
     await message.answer("📋 Вот список найденных приютов:", reply_markup=keyboard)
 
-    # Добавляем кнопки-фильтры по типу нужды
+    # Добавляем дополнительные кнопки-фильтры по типу нужды
     filter_buttons = InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -138,10 +141,14 @@ async def show_info(callback: types.CallbackQuery):
     from database import get_shelter_by_id
     row = get_shelter_by_id(shelter_id)
     if row:
-        name, link, info = row
-        msg = f"<b>{name}</b>\n{link}\n\n{info or 'Нет описания.'}"
+        # Распаковываем поля; если post_date не требуется – можно не выводить
+        name, link, info, post_date = row
+        msg = f"<b>{name}</b>\n{link}\n"
+        if post_date:
+            msg += f"\n🗓 Дата поста: {post_date}\n"
+        msg += f"\n{info or 'Нет описания.'}"
         msg = msg[:4093] + "..." if len(msg) > 4096 else msg
-        # Формируем кнопку для добавления в избранное
+        # Кнопка для добавления в избранное
         button_markup = InlineKeyboardMarkup(
             inline_keyboard=[
                 [InlineKeyboardButton(text="⭐ В избранное", callback_data=f"fav|{shelter_id}|{link}")]
@@ -186,7 +193,7 @@ async def show_favorites(message: Message):
 @dp.callback_query(lambda c: c.data.startswith("recent_posts_"))
 async def handle_recent_posts(callback_query: types.CallbackQuery):
     """
-    Вывод свежих постов приюта.
+    Вывод свежих постов приюта за последние 7 дней.
     """
     group_id = callback_query.data.replace("recent_posts_", "")
     posts = get_recent_posts_for_group(group_id)
@@ -203,15 +210,19 @@ async def handle_recent_posts(callback_query: types.CallbackQuery):
 async def handle_filter(callback: types.CallbackQuery):
     """
     Фильтрация приютов по типу нужды.
+    Заметьте, что функция get_filtered_shelters должна быть реализована в модуле database.
+    Если её нет, необходимо добавить соответствующий запрос.
     """
-    from database import get_filtered_shelters
+    # Если функция get_filtered_shelters отсутствует, можно реализовать фильтрацию по info,
+    # например, выбирая записи, в которых содержится ключевое слово.
+    from database import get_filtered_shelters  # Убедитесь, что такая функция есть или добавьте её
     city = user_city.get(callback.from_user.id)
     if not city:
         await callback.message.answer("Сначала выберите или введите город.")
         return
 
     filter_type = "Волонтёрство" if callback.data == "filter_volunteer" else "Сбор"
-    db_key = f"📦 {filter_type}" if "Сбор" in filter_type else f"🔧 {filter_type}"
+    db_key = filter_type  # Предполагается, что в поле info найдётся информация с этими ключевыми словами
     filtered = get_filtered_shelters(city, db_key)
     if not filtered:
         await callback.message.answer("Пока нет записей по данному фильтру.")

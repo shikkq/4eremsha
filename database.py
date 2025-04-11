@@ -7,7 +7,7 @@ def init_db():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
 
-    # таблица приютов: добавлено поле post_date для хранения даты поста
+    # Таблица приютов: добавлено поле post_date для хранения даты поста
     c.execute("""
         CREATE TABLE IF NOT EXISTS shelters (
             id TEXT PRIMARY KEY,
@@ -19,7 +19,7 @@ def init_db():
         )
     """)
 
-    # таблица показанных приютов (для смены каждые 3 дня)
+    # Таблица показанных приютов (для смены каждые 3 дня, используется только если нужно историю)
     c.execute("""
         CREATE TABLE IF NOT EXISTS shown_shelters (
             city TEXT,
@@ -28,7 +28,7 @@ def init_db():
         )
     """)
 
-    # таблица избранного
+    # Таблица избранного
     c.execute("""
         CREATE TABLE IF NOT EXISTS favorites (
             user_id INTEGER,
@@ -38,7 +38,7 @@ def init_db():
         )
     """)
 
-    # таблица постов из избранных приютов
+    # Таблица постов из избранных приютов
     c.execute("""
         CREATE TABLE IF NOT EXISTS favorite_posts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -69,49 +69,22 @@ def add_shelter(id, name, link, city, info="", post_date=""):
 def get_shelters_for_city(city, limit=20):
     """
     Возвращает список приютов для указанного города.
-    Если для города уже были показаны какие-либо приюты за последние 3 дня, выводятся именно они.
-    Иначе выбираются случайные записи.
+    Теперь НЕ фильтрует по таблице shown_shelters – выводятся все записи,
+    отсортированные по дате поста (сначала самые свежие).
     """
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-
-    # 1. Проверяем, были ли уже показаны приюты для этого города
-    cursor.execute("""
-        SELECT group_id, shown_date FROM shown_shelters
-        WHERE city = ?
-    """, (city,))
-    shown = cursor.fetchall()
-
-    now = datetime.now().date()
-
-    if shown:
-        shown_date = datetime.strptime(shown[0][1], "%Y-%m-%d").date()
-        if (now - shown_date).days < 3:
-            ids = [s[0] for s in shown]
-            if ids:
-                query = f"SELECT * FROM shelters WHERE id IN ({','.join(['?']*len(ids))})"
-                cursor.execute(query, ids)
-                result = cursor.fetchall()
-                conn.close()
-                return result
-
-    # 2. Иначе — выбираем новые приюты
+    # Если поле post_date заполнено, сортируем по нему, иначе по ROWID
     cursor.execute("""
         SELECT * FROM shelters
         WHERE city = ?
-        ORDER BY RANDOM()
+        ORDER BY CASE 
+                    WHEN post_date != '' THEN datetime(post_date)
+                    ELSE ROWID
+                 END DESC
         LIMIT ?
     """, (city, limit))
     result = cursor.fetchall()
-
-    # 3. Обновляем таблицу shown_shelters
-    cursor.execute("DELETE FROM shown_shelters WHERE city = ?", (city,))
-    for row in result:
-        cursor.execute("""
-            INSERT INTO shown_shelters (city, group_id, shown_date)
-            VALUES (?, ?, ?)
-        """, (city, row[0], now.strftime("%Y-%m-%d")))
-    conn.commit()
     conn.close()
     return result
 
