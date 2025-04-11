@@ -1,6 +1,6 @@
 import os
 import time
-from threading import Thread, Lock
+from threading import Thread
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
 
@@ -19,12 +19,9 @@ WEBHOOK_URL = os.getenv("WEBHOOK_URL", "supersecret")
 RENDER_URL = os.getenv("RENDER_EXTERNAL_URL")
 PORT = int(os.getenv("PORT", "10000"))
 
-# Путь к файлу последнего запуска и минимальный интервал (30 мин)
+# Пусть к файлу последнего запуска
 LAST_RUN_FILE = "last_run.txt"
 MIN_INTERVAL_SECONDS = 60 * 30  # 30 минут
-
-# Глобальная блокировка для парсера
-parser_lock = Lock()
 
 # Инициализация компонентов
 bot = Bot(token=TOKEN)
@@ -34,14 +31,11 @@ storage = MemoryStorage()
 async def lifespan(app: FastAPI):
     if RENDER_URL:
         webhook_url = f"{RENDER_URL}/webhook/{WEBHOOK_URL}"
-        try:
-            await bot.set_webhook(webhook_url)
-            print(f"✅ Webhook установлен: {webhook_url}")
-        except Exception as e:
-            print(f"[!] Ошибка установки webhook в lifespan: {e}")
+        await bot.set_webhook(webhook_url)
+        print(f"✅ Webhook установлен: {webhook_url}")
     else:
         print("❌ Не задан RENDER_EXTERNAL_URL")
-    yield  # Можно добавить логику при завершении
+    yield  # On shutdown logic можно добавить здесь
 
 app = FastAPI(lifespan=lifespan)
 
@@ -60,14 +54,7 @@ def root():
     return {"message": "Hello from FastAPI"}
 
 @app.get("/ping")
-async def ping():
-    # Обновляем webhook в фоновом режиме как резерв, не блокируя обработку запроса
-    try:
-        webhook_url = f"{RENDER_URL}/webhook/{WEBHOOK_URL}"
-        # Создаем задачу для обновления вебхука
-        _ =  asyncio.create_task(bot.set_webhook(webhook_url))
-    except Exception as e:
-        print(f"Ошибка установки webhook в /ping: {e}")
+def ping():
     return {"pong": True}
 
 @app.get("/run-parser")
@@ -75,30 +62,19 @@ def run_parser_route():
     try:
         now = time.time()
 
-        # Проверка времени последнего запуска через файл
+        # Проверка времени последнего запуска
         if os.path.exists(LAST_RUN_FILE):
             with open(LAST_RUN_FILE, "r") as f:
                 last_run = float(f.read().strip() or 0)
             if now - last_run < MIN_INTERVAL_SECONDS:
                 return {"status": "Пропущено — парсер недавно запускался."}
 
-        # Зафиксировать время запуска
+        # Обновляем метку времени
         with open(LAST_RUN_FILE, "w") as f:
             f.write(str(now))
 
-        # Если парсер уже запущен, не запускаем повторно
-        if parser_lock.locked():
-            return {"status": "Парсер уже запущен."}
-
-        # Функция-обёртка, запускающая парсер под блокировкой
-        def run_parser():
-            with parser_lock:
-                print("⏳ Парсер стартовал...")
-                update_all_cities()
-                print("✅ Парсер завершил работу.")
-
-        # Запуск фонового потока (daemon=True, чтобы поток завершался вместе с процессом)
-        Thread(target=run_parser, daemon=True).start()
+        # Запуск парсера в фоне
+        Thread(target=update_all_cities).start()
         return {"status": "Парсинг запущен"}
     except Exception as e:
         return {"error": str(e)}
