@@ -19,7 +19,7 @@ def init_db():
         )
     """)
 
-    # Таблица показанных приютов (для смены каждые 3 дня, используется только если нужно историю)
+    # Таблица показанных приютов (для смены каждые 3 дня, используется только если нужна история)
     c.execute("""
         CREATE TABLE IF NOT EXISTS shown_shelters (
             city TEXT,
@@ -28,22 +28,22 @@ def init_db():
         )
     """)
 
-    # Таблица избранного
+    # Таблица пользовательских городов (сохранение городов, введённых пользователями)
     c.execute("""
-        CREATE TABLE IF NOT EXISTS favorites (
+        CREATE TABLE IF NOT EXISTS user_cities (
             user_id INTEGER,
-            post_url TEXT,
-            group_id TEXT,
-            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            city TEXT,
+            UNIQUE(user_id, city)
         )
     """)
 
-    # Таблица постов из избранных приютов
+    # Таблица сохранённых постов (для команды /fav)
     c.execute("""
-        CREATE TABLE IF NOT EXISTS favorite_posts (
+        CREATE TABLE IF NOT EXISTS saved_posts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            group_id TEXT,
+            user_id INTEGER,
             post_url TEXT UNIQUE,
+            group_id TEXT,
             text TEXT,
             added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
@@ -66,11 +66,37 @@ def add_shelter(id, name, link, city, info="", post_date=""):
         pass
     conn.close()
 
+def add_user_city(user_id, city):
+    """
+    Добавляет город, введённый пользователем, в таблицу user_cities.
+    Название города нормализуется (первая буква заглавная, без лишних пробелов).
+    """
+    normalized_city = city.strip().title()
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    try:
+        c.execute("INSERT OR IGNORE INTO user_cities (user_id, city) VALUES (?, ?)", (user_id, normalized_city))
+        conn.commit()
+    except Exception as e:
+        print("Ошибка добавления города:", e)
+    conn.close()
+
+def get_user_cities(user_id):
+    """
+    Возвращает список городов, сохранённых для данного пользователя.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT city FROM user_cities WHERE user_id = ?", (user_id,))
+    rows = c.fetchall()
+    conn.close()
+    return [row[0] for row in rows]
+
 def get_filtered_shelters(city: str, filter_keyword: str):
     """
-    Возвращает приюты для указанного города, у которых в info встречается ключевое слово.
+    Возвращает приюты для указанного города, у которых в поле info встречается filter_keyword.
     """
-    conn = sqlite3.connect("shelters.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute(
         "SELECT id, name FROM shelters WHERE city = ? AND info LIKE ?",
@@ -83,12 +109,11 @@ def get_filtered_shelters(city: str, filter_keyword: str):
 def get_shelters_for_city(city, limit=20):
     """
     Возвращает список приютов для указанного города.
-    Теперь НЕ фильтрует по таблице shown_shelters – выводятся все записи,
+    Запрос не использует таблицу shown_shelters – выводятся все записи,
     отсортированные по дате поста (сначала самые свежие).
     """
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    # Если поле post_date заполнено, сортируем по нему, иначе по ROWID
     cursor.execute("""
         SELECT * FROM shelters
         WHERE city = ?
@@ -102,99 +127,4 @@ def get_shelters_for_city(city, limit=20):
     conn.close()
     return result
 
-def get_shelter_by_id(shelter_id):
-    """
-    Возвращает запись по идентификатору приюта в виде кортежа:
-      (name, link, info, post_date)
-    """
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT name, link, info, post_date FROM shelters WHERE id = ?", (shelter_id,))
-    row = cursor.fetchone()
-    conn.close()
-    return row
-
-def add_favorite(user_id, post_url, group_id):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("""
-        INSERT OR IGNORE INTO favorites (user_id, post_url, group_id)
-        VALUES (?, ?, ?)
-    """, (user_id, post_url, group_id))
-    conn.commit()
-    conn.close()
-
-def get_user_favorites(user_id):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT post_url, group_id FROM favorites
-        WHERE user_id = ?
-        ORDER BY added_at DESC
-    """, (user_id,))
-    favorites = cursor.fetchall()
-    conn.close()
-    return favorites
-
-def get_recent_posts_for_group(group_id, days=7):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cutoff = datetime.now() - timedelta(days=days)
-    cursor.execute("""
-        SELECT post_url, text FROM favorite_posts
-        WHERE group_id = ? AND added_at >= ?
-        ORDER BY added_at DESC
-    """, (group_id, cutoff))
-    posts = cursor.fetchall()
-    conn.close()
-    return posts
-
-def get_favorite_group_ids():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT DISTINCT group_id FROM favorites")
-    result = cursor.fetchall()
-    conn.close()
-    return [r[0] for r in result]
-
-def post_already_saved(post_url):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT 1 FROM favorite_posts WHERE post_url = ?", (post_url,))
-    result = cursor.fetchone()
-    conn.close()
-    return result is not None
-
-def save_favorite_post(group_id, post_url, text):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("""
-        INSERT OR IGNORE INTO favorite_posts (group_id, post_url, text)
-        VALUES (?, ?, ?)
-    """, (group_id, post_url, text))
-    conn.commit()
-    conn.close()
-
-def get_latest_favorite_posts(limit=10):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT post_url, text FROM favorite_posts
-        ORDER BY added_at DESC
-        LIMIT ?
-    """, (limit,))
-    result = cursor.fetchall()
-    conn.close()
-    return result
-
-# Для отладки (необязательно)
-def list_tables():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-    tables = cursor.fetchall()
-    conn.close()
-    return [t[0] for t in tables]
-
-if __name__ == "__main__":
-    init_db()
+def get_shelter_by
