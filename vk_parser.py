@@ -7,38 +7,25 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 from urllib.parse import quote
 from dotenv import load_dotenv
+from database import add_shelter
+
+from yargy.tokenizer import Tokenizer, MorphTokenizer
 from yargy import Parser, rule, or_
 from yargy.interpretation import fact
 from yargy.predicates import gram, dictionary, normalized
-from yargy.tokenizer import Tokenizer, MorphTokenizer
 from pymorphy3 import MorphAnalyzer
-from database import add_shelter
 
-# Настройка логирования
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-load_dotenv()
-
-# Конфигурация
-VK_TOKEN = os.getenv("VK_TOKEN")
-VK_KEYWORDS = os.getenv(
-    "VK_KEYWORDS", 
-    "приют,волонт,животн,кошк,собак,хвост,помощь,нужн,срочно,помогите,поддержка"
-).split(",")
-VK_API_VERSION = "5.199"
-CACHE_FILE = "parsed_groups.json"
-REQUEST_TIMEOUT = 10
-MAX_POST_AGE_DAYS = 30
-
-# Инициализация NLP-компонентов
 class AddressParser:
     def __init__(self):
         self.morph = MorphAnalyzer()
+        
+        # Инициализация токенизатора с дефолтными настройками
+        base_tokenizer = Tokenizer()
         self.tokenizer = MorphTokenizer(
-            rules=Tokenizer.DEFAULT_RULES,  # Исправлено здесь
+            splitter=base_tokenizer.splitter,
             morph=self.morph
         )
+        
         self._init_parser()
 
     def _init_parser(self):
