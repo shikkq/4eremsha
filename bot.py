@@ -131,4 +131,50 @@ async def show_shelters(message: Message, city: str):
 
 @dp.callback_query(lambda c: c.data.startswith("info_"))
 async def show_info(callback: types.CallbackQuery):
-    shelter_id = callback.data[_
+    shelter_id = callback.data[5:]
+    row = get_shelter_by_id(shelter_id)
+    if not row:
+        await callback.message.answer("Информация не найдена.")
+        return
+
+    name, link, info, post_date = row
+    urgency = detect_urgency(info or "")
+    address_match = re.search(r"(ул\.|улица|проспект|д\.\s?\d+|город\s.+)", info or "", re.IGNORECASE)
+    address = address_match.group(0) if address_match else ""
+    address_link = linkify_address(address)
+    contacts = "\n".join(re.findall(r"(?:\+7|8)\d{10}|\b@\w+|\bhttps?://\S+", info or "")) or "Контакты не найдены"
+    days = days_ago(post_date or "")
+
+    msg = (
+        f"<b>{name}</b>\n"
+        f"{link}\n"
+        f"⏳ <i>{days}</i>\n"
+        f"🏷 <b>{urgency}</b>\n"
+        f"📍 {address_link}\n"
+        f"📞 {contacts}"
+    )
+
+    button = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💾 Сохранить", callback_data=f"fav|{shelter_id}|{link}")]
+    ])
+
+    user_id = callback.from_user.id
+    if user_id in user_last_msg:
+        try:
+            await callback.message.bot.delete_message(callback.message.chat.id, user_last_msg[user_id])
+        except:
+            pass
+
+    sent = await callback.message.answer(msg, reply_markup=button, parse_mode="HTML", disable_web_page_preview=True)
+    user_last_msg[user_id] = sent.message_id
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data.startswith("fav|"))
+async def add_to_favorites(callback: types.CallbackQuery):
+    _, shelter_id, post_url = callback.data.split("|")
+    row = get_shelter_by_id(shelter_id)
+    if row:
+        name, _, info, _ = row
+        text = f"{name}\n\n{info[:300]}..." if info else name
+        save_post(callback.from_user.id, post_url, shelter_id, text)
+    await callback.answer("💾 Сохранено.")
