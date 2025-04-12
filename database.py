@@ -127,4 +127,73 @@ def get_shelters_for_city(city, limit=20):
     conn.close()
     return result
 
-def get_shelter_by
+def get_shelter_by_id(shelter_id):
+    """
+    Возвращает запись по идентификатору приюта в виде кортежа:
+      (name, link, info, post_date)
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT name, link, info, post_date FROM shelters WHERE id = ?", (shelter_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return row
+
+def save_post(user_id, post_url, group_id, text):
+    """
+    Сохраняет пост для пользователя (используется командой /fav).
+    Если пост с таким post_url уже сохранён, не перезаписывает его.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT OR IGNORE INTO saved_posts (user_id, post_url, group_id, text)
+        VALUES (?, ?, ?, ?)
+    """, (user_id, post_url, group_id, text))
+    conn.commit()
+    conn.close()
+
+def get_user_saved_posts(user_id):
+    """
+    Возвращает сохранённые посты пользователя.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT post_url, text FROM saved_posts
+        WHERE user_id = ?
+        ORDER BY added_at DESC
+    """, (user_id,))
+    posts = cursor.fetchall()
+    conn.close()
+    return posts
+
+def get_recent_posts_for_group(group_id, days=7):
+    """
+    Возвращает сохранённые посты для группы, добавленные за последние days дней.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cutoff = datetime.now() - timedelta(days=days)
+    cursor.execute("""
+        SELECT post_url, text FROM saved_posts
+        WHERE group_id = ? AND added_at >= ?
+        ORDER BY added_at DESC
+    """, (group_id, cutoff))
+    posts = cursor.fetchall()
+    conn.close()
+    return posts
+
+def list_tables():
+    """
+    Для отладки: возвращает список таблиц в базе.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    tables = cursor.fetchall()
+    conn.close()
+    return [t[0] for t in tables]
+
+if __name__ == "__main__":
+    init_db()
