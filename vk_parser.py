@@ -4,64 +4,63 @@ import json
 import os
 import logging
 from datetime import datetime, timedelta
-from typing import List, Dict, Optional
-from urllib.parse import quote
+from typing import List, Dict
 from dotenv import load_dotenv
-from database import add_shelter
-
-from yargy.tokenizer import Tokenizer, MorphTokenizer
 from yargy import Parser, rule, or_
 from yargy.interpretation import fact
-from yargy.predicates import gram, dictionary, normalized
+from yargy.predicates import gram, dictionary
+from yargy.tokenizer import MorphTokenizer
 from pymorphy3 import MorphAnalyzer
+from database import add_shelter
 
+# Настройка логирования
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+load_dotenv()
+
+# Конфигурация
+VK_TOKEN = os.getenv("VK_TOKEN")
+VK_KEYWORDS = os.getenv(
+    "VK_KEYWORDS", 
+    "приют,волонт,животн,кошк,собак,хвост,помощь,нужн,срочно,помогите,поддержка"
+).split(",")
+VK_API_VERSION = "5.199"
+CACHE_FILE = "parsed_groups.json"
+REQUEST_TIMEOUT = 10
+MAX_POST_AGE_DAYS = 30
+
+# Упрощенный парсер адресов
 class AddressParser:
     def __init__(self):
         self.morph = MorphAnalyzer()
-        
-        # Инициализация токенизатора с дефолтными настройками
-        base_tokenizer = Tokenizer()
-        self.tokenizer = MorphTokenizer(
-            splitter=base_tokenizer.splitter,
-            morph=self.morph
-        )
-        
+        self.tokenizer = MorphTokenizer(self.morph)  # Исправленная инициализация
         self._init_parser()
 
     def _init_parser(self):
-        Address = fact('Address', ['city', 'street', 'building'])
+        Address = fact('Address', ['city', 'street'])
 
         CITY = or_(
             gram('Geox'),
-            dictionary({'город', 'г'}).interpretation(Address.city)
-        )
+            dictionary({'город', 'г'})
+        ).interpretation(Address.city)
 
         STREET = or_(
             gram('Abbr'),
-            dictionary({'улица', 'ул', 'проспект', 'пр', 'шоссе', 'ш'})
+            dictionary({'улица', 'ул', 'проспект', 'пр'})
         ).interpretation(Address.street)
 
-        BUILDING = or_(
-            gram('NUMR'),
-            rule(normalized('д'), gram('Abbr')),
-            rule(normalized('дом'), gram('NOUN'))
-        ).interpretation(Address.building)
-
         self.parser = Parser(
-            rule(CITY, STREET, BUILDING),
+            rule(CITY, STREET),
             tokenizer=self.tokenizer
         )
 
     def extract(self, text: str) -> List[str]:
         addresses = []
         for match in self.parser.findall(text):
-            parts = [
-                token.value 
-                for token in match.tokens 
-                if token.value.lower() not in {'г', 'город', 'ул', 'улица', 'д', 'дом'}
-            ]
+            parts = [token.value for token in match.tokens]
             if parts:
-                addresses.append(', '.join(parts))
+                addresses.append(' '.join(parts))
         return addresses
 
 address_parser = AddressParser()
