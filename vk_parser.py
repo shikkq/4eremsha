@@ -26,7 +26,7 @@ segmenter = Segmenter()
 emb = NewsEmbedding()
 morph_tagger = NewsMorphTagger(emb)
 ner_tagger = NewsNERTagger(emb)
-addr_extractor = AddrExtractor()
+addr_extractor = AddrExtractor(morph=morph_tagger)  # ← здесь было упущено
 
 if os.path.exists(CACHE_FILE):
     with open(CACHE_FILE, "r", encoding="utf-8") as f:
@@ -128,7 +128,7 @@ def extract_info_from_posts(posts_texts, city_name):
         info_lines = []
         post_date_unix = post.get("date")
         post_date = datetime.fromtimestamp(post_date_unix)
-        last_date = post_date.strftime("%d.%m.%Y") if post_date_unix else "неизвестно"
+        days_ago = (datetime.now() - post_date).days
 
         if "(неактивно)" in lowered:
             score -= 2
@@ -154,7 +154,7 @@ def extract_info_from_posts(posts_texts, city_name):
 
         if score >= best_score:
             best_score = score
-            result = f"\U0001F4C5 Пост опубликован { (datetime.now() - post_date).days } дней назад\n\n"
+            result = f"\U0001F4C5 Пост опубликован {days_ago} дней назад\n\n"
             if info_lines:
                 result += "\U0001F4CC Что нужно:\n" + "\n".join(info_lines[:1]) + "\n"
             if contacts:
@@ -171,5 +171,3 @@ def extract_info_from_posts(posts_texts, city_name):
         return None
 
     return best_info
-
-# Остальные функции (get_group_posts, search_vk_groups) остаются без изменений, их ты уже прислал корректно.

@@ -1,4 +1,4 @@
-from aiogram import Dispatcher, types, F
+from aiogram import Dispatcher, types
 from aiogram.types import (
     Message, InlineKeyboardMarkup, InlineKeyboardButton,
     ReplyKeyboardMarkup, KeyboardButton
@@ -41,6 +41,30 @@ def detect_urgency(text: str) -> str:
     else:
         return "❔ Не указано"
 
+def extract_contacts(text: str) -> str:
+    phones = re.findall(r"(?:\+7|8)\d{10}", text)
+    links = re.findall(r"https?://\S+", text)
+    handles = re.findall(r"@\w+", text)
+    combined = phones + handles + links
+    return "\n".join(combined) if combined else "Контакты не найдены"
+
+def extract_address(text: str) -> str:
+    match = re.search(r"(ул\.|улица|проспект|переулок|шоссе|пл\.|площадь|д\.\s?\d+|город\s[^.,\n]+)", text, re.IGNORECASE)
+    return match.group(0) if match else ""
+
+def extract_needs(text: str) -> str:
+    patterns = [
+        r"(нужн[оа]|ищем|требуетс[яи]).+?([.!?;\n]|$)",  # Прямые указания на нужды
+        r"необходим[оа].+?([.!?;\n]|$)",
+        r"(примем|собираем|сбор|ищем).+?([.!?;\n]|$)"
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
+        if match:
+            sentence = match.group(0).strip()
+            return sentence.capitalize()
+    return "Подробности в посте ниже."
+
 # Команды
 @dp.message(Command("start"))
 async def start_handler(message: Message):
@@ -59,7 +83,7 @@ async def start_handler(message: Message):
 async def help_handler(message: Message):
     await message.answer(
         "📌 /start — выбрать город\n"
-        "📍 /near — приюты рядом\n"
+        "📍 /near — приюты рядом (в разработке)\n"
         "💾 /fav — сохранённые посты\n"
         "ℹ️ /about — о проекте"
     )
@@ -139,11 +163,11 @@ async def show_info(callback: types.CallbackQuery):
 
     name, link, info, post_date = row
     urgency = detect_urgency(info or "")
-    address_match = re.search(r"(ул\.|улица|проспект|д\.\s?\d+|город\s.+)", info or "", re.IGNORECASE)
-    address = address_match.group(0) if address_match else ""
+    address = extract_address(info or "")
     address_link = linkify_address(address)
-    contacts = "\n".join(re.findall(r"(?:\+7|8)\d{10}|\b@\w+|\bhttps?://\S+", info or "")) or "Контакты не найдены"
+    contacts = extract_contacts(info or "")
     days = days_ago(post_date or "")
+    needs = extract_needs(info or "")
 
     msg = (
         f"<b>{name}</b>\n"
@@ -151,7 +175,8 @@ async def show_info(callback: types.CallbackQuery):
         f"⏳ <i>{days}</i>\n"
         f"🏷 <b>{urgency}</b>\n"
         f"📍 {address_link}\n"
-        f"📞 {contacts}"
+        f"📞 {contacts}\n\n"
+        f"<i>{needs}</i>"
     )
 
     button = InlineKeyboardMarkup(inline_keyboard=[
