@@ -125,9 +125,8 @@ async def show_shelters(msg_obj, city: str):
         shelter_id, name, url, _, info, post_date = shelter
         buttons.append([InlineKeyboardButton(text=name, callback_data=f"info_{shelter_id}")])
     keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
-
-    # Добавляем кнопку "Вернуться к городам"
-    keyboard.add(InlineKeyboardButton(text="🌆 Вернуться к городам", callback_data="back_cities"))
+    # Добавляем кнопку "Вернуться к городам" напрямую в inline_keyboard
+    keyboard.inline_keyboard.append([InlineKeyboardButton(text="🌆 Вернуться к городам", callback_data="back_cities")])
     msg = await update_message(msg_obj, "📋 Вот список найденных приютов:", reply_markup=keyboard)
     user_last_msg[msg.chat.id] = msg
 
@@ -179,11 +178,9 @@ def clean_info(info: str) -> tuple[str, str]:
     if "что нужно:" in lower_clean:
         idx = lower_clean.index("что нужно:") + len("что нужно:")
         remainder = cleaned_info[idx:].strip()
-        # Берём первое предложение (до точки или переноса строки)
         sentence = re.split(r"[.!?]", remainder)[0].strip()
         main_need = sentence
     else:
-        # Если не найдено, используем первые 100 символов как базовую потребность
         main_need = cleaned_info[:100].strip()
 
     return main_need, urgency
@@ -270,8 +267,7 @@ async def back_to_shelters(callback: types.CallbackQuery):
 
 @dp.callback_query(lambda c: c.data == "fav_menu")
 async def show_fav_menu(callback: types.CallbackQuery):
-    # Просто перенаправляем на команду /fav (показываем сохранённые посты)
-    # Можно вызвать show_favorites, но здесь редактируем сообщение
+    # Показываем сохранённые посты
     user_id = callback.from_user.id
     favorites = get_user_favorites(user_id)
     if not favorites:
