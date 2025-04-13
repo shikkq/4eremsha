@@ -5,10 +5,3 @@ beautifulsoup4
 python-dotenv
 fastapi
 uvicorn
-natasha
-razdel
-pymorphy2
-pymorphy2-dicts-ru
-lxml
-pymorphy3
-yargy

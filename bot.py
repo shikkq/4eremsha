@@ -1,161 +1,252 @@
-from aiogram import Dispatcher, types
+from aiogram import Dispatcher, types, F
 from aiogram.types import (
     Message, InlineKeyboardMarkup, InlineKeyboardButton,
     ReplyKeyboardMarkup, KeyboardButton
 )
 from aiogram.filters import Command
 from database import (
-    init_db, get_shelters_for_city, save_post, get_user_saved_posts,
-    get_shelter_by_id, add_user_city
+    init_db, get_shelters_for_city, add_favorite,
+    get_user_favorites, get_recent_posts_for_group,
+    get_shelter_by_id, get_filtered_shelters
 )
-from vk_parser import extract_address  # Импортируем новый парсер адресов
 import asyncio
 import re
 from datetime import datetime
 from urllib.parse import quote
 
+# Инициализация базы данных (если база уже существует — данные не удаляются)
 init_db()
 dp = Dispatcher()
 
+# Основной список предлагаемых городов
 CITIES = ["Новосибирск"]
+# Словарь для сохранения выбранного пользователем города: user_id -> city
 user_city: dict[int, str] = {}
+# Словарь для отслеживания последнего сообщения с информацией по приюту:
+# user_id -> message_id, чтобы удалять прошлое сообщение при выборе нового приюта
 user_last_msg: dict[int, int] = {}
 
-# Утилиты
-def days_ago(date_str: str) -> str:
-    try:
-        post_date = datetime.fromisoformat(date_str)
-        days = (datetime.now() - post_date).days
-        if days == 0:
-            return "сегодня"
-        return f"{days} дн. назад"
-    except:
-        return "дата неизвестна"
-
-def linkify_address(text: str) -> str:
-    if not text:
-        return "Адрес не указан"
-    encoded = quote(text)
-    return f"<a href='https://yandex.ru/maps/?text={encoded}'>{text}</a>"
-
-def detect_urgency(text: str) -> str:
-    text = text.lower()
-    if "срочн" in text:
-        return "🔥 Срочно"
-    elif any(kw in text for kw in ["не срочн", "можно позже"]):
-        return "⏱ Не срочно"
-    return "❔ Не указано"
-
-def extract_contacts(text: str) -> str:
-    phones = re.findall(r"(?:\+7|8)\d{10}", text)
-    links = re.findall(r"https?://\S+", text)
-    handles = re.findall(r"(?:@|t\.me/)\w+", text)
-    combined = phones + handles + links
-    return "\n".join(combined[:3]) if combined else "Контакты не найдены"
-
-# Удалена старая extract_address, используем импортированную из vk_parser
-
-def extract_needs(text: str) -> str:
-    patterns = [
-        r"(?<=нужн[оаи]|ищем|требуетс[яи]|необходим[оа]|примем|собираем|сбор)[^.!?;\n]*",
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
-        if match:
-            sentence = match.group(0).strip(" :,-")
-            return sentence.capitalize() + "..." if sentence else "Нужна помощь"
-    return "Нужна помощь (детали в посте)"
-
-# Команды
 @dp.message(Command("start"))
 async def start_handler(message: Message):
-    keyboard = [
-        [KeyboardButton(text=city)] for city in CITIES
-    ]
-    keyboard.append([KeyboardButton(text="🌆 Другой город")])
-    
     await message.answer(
-        "🐾 Привет! Выберите город для поиска приютов:",
+        "Привет! Выберите город, чтобы найти приюты, которым нужна помощь:",
         reply_markup=ReplyKeyboardMarkup(
-            keyboard=keyboard,
-            resize_keyboard=True,
-            input_field_placeholder="Выберите или введите город"
+            keyboard=[
+                *[[KeyboardButton(text=city)] for city in CITIES],
+                [KeyboardButton(text="Другой город")]
+            ],
+            resize_keyboard=True
         )
     )
 
-# Остальные команды остаются без изменений...
+@dp.message(Command("help"))
+async def help_handler(message: Message):
+    await message.answer(
+        "👋 Я бот, помогающий волонтёрам находить приюты и посты с нуждами.\n\n"
+        "📌 /start — начать работу, выбрать город\n"
+        "⭐ /fav — ваши сохранённые посты\n"
+        "ℹ️ /about — узнать о проекте\n"
+        "❓ /help — список команд"
+    )
+
+@dp.message(Command("about"))
+async def about_handler(message: Message):
+    await message.answer(
+        "🐾 Этот бот — часть школьного социального проекта. Он помогает волонтёрам находить приюты, "
+        "которым нужна помощь, и отслеживать актуальные посты. Парсинг осуществляется с ВКонтакте.\n\n"
+        "Проект некоммерческий 💙"
+    )
+
+@dp.message(lambda m: m.text in CITIES or m.text == "Другой город")
+async def handle_city_choice(message: Message):
+    user_id = message.from_user.id
+    city = message.text
+    if city == "Другой город":
+        await message.answer("Введите название города вручную:")
+        return
+    user_city[user_id] = city
+    await message.answer(f"Ищем приюты в городе {city}, подождите немного...")
+    await show_shelters(message, city)
+
+@dp.message(lambda m: m.text and m.from_user.id in user_city and m.text not in CITIES)
+async def handle_custom_city(message: Message):
+    city = message.text.strip()
+    user_city[message.from_user.id] = city
+    await message.answer(f"Ищем приюты в городе {city}, подождите немного...")
+    await show_shelters(message, city)
 
 async def show_shelters(message: Message, city: str):
+    # Получаем приюты из базы для указанного города
     shelters = get_shelters_for_city(city)
-    
+
     if not shelters:
-        await message.answer(f"🔍 Ищем приюты в {city}...")
+        await message.answer(f"📭 Информации по городу {city} пока нет. Ищем свежие данные...")
         try:
             from vk_parser import search_vk_groups
             await asyncio.to_thread(search_vk_groups, city)
-            shelters = get_shelters_for_city(city)
         except Exception as e:
-            await message.answer("⚠️ Ошибка поиска, попробуйте позже")
-            print(f"Error: {e}")
+            await message.answer("⚠️ Произошла ошибка при попытке собрать информацию.")
+            print("Ошибка парсинга:", e)
+
+        # Повторяем проверку каждые 2 секунды (до 10 секунд)
+        for _ in range(5):
+            await asyncio.sleep(2)
+            shelters = get_shelters_for_city(city)
+            if shelters:
+                break
+
+        if not shelters:
+            await message.answer("Пока нет актуальной информации. Попробуйте позже.")
             return
 
-    buttons = [
-        [InlineKeyboardButton(
-            text=f"{name[:20]}... {days_ago(post_date)}",
-            callback_data=f"info_{shelter_id}"
-        )] for shelter in shelters
-        for shelter_id, name, _, _, _, post_date in [shelter]
-    ]
-    
-    await message.answer(
-        f"🏠 Найдено приютов в {city}: {len(shelters)}",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
-    )
+    # Формируем список inline-кнопок для найденных приютов
+    buttons = []
+    for shelter in shelters:
+        # Извлекаем id, name, url, _, info, post_date из записи
+        shelter_id, name, url, _, info, post_date = shelter
+        buttons.append([InlineKeyboardButton(text=name, callback_data=f"info_{shelter_id}")])
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+
+    await message.answer("📋 Вот список найденных приютов:", reply_markup=keyboard)
+
+    # Удалены дополнительные кнопки фильтрации (волонтёрство, сбор)
+
+def trim_to_sentence(text: str, limit: int = 4096) -> str:
+    """
+    Если текст превышает лимит, обрезает его до конца последнего полного предложения или абзаца.
+    """
+    if len(text) <= limit:
+        return text
+    cutoff = text[:limit]
+    last_dot = cutoff.rfind(". ")
+    last_newline = cutoff.rfind("\n")
+    cut_pos = max(last_dot, last_newline)
+    return (cutoff[:cut_pos+1] if cut_pos > 0 else cutoff.rstrip()) + "..."
+
+def clean_info(info: str) -> tuple[str, str]:
+    """
+    Обрабатывает текст описания:
+    - Определяет срочность: ищет ключевые слова «срочно» / «не срочно».
+    - Удаляет упоминания ключевых слов "волонтёрство" и "сбор".
+    - Убирает повторяющиеся строки и оставляет только необходимую информацию.
+    - Если встречается блок «что нужно:», то оставляет его.
+    """
+    # Определяем срочность
+    urgency = "Не указано"
+    lower_info = info.lower()
+    if "срочно" in lower_info:
+        urgency = "Срочно"
+    elif "не срочно" in lower_info:
+        urgency = "Не срочно"
+
+    # Удаляем ключевые слова
+    for word in ["волонтёрство", "сбор"]:
+        info = info.replace(word, "")
+
+    # Убираем дублирующие строки
+    lines = [line.strip() for line in info.split("\n") if line.strip()]
+    seen = set()
+    unique_lines = []
+    for line in lines:
+        if line.lower() not in seen:
+            unique_lines.append(line)
+            seen.add(line.lower())
+    cleaned_info = "\n".join(unique_lines)
+
+    # Если встречается блок «что нужно:», то оставляем только его и последующий текст
+    lower_clean = cleaned_info.lower()
+    if "что нужно:" in lower_clean:
+        idx = lower_clean.index("что нужно:")
+        cleaned_info = cleaned_info[idx:]
+        # Можно добавить переформулировку, если требуется
+
+    return cleaned_info, urgency
 
 @dp.callback_query(lambda c: c.data.startswith("info_"))
 async def show_info(callback: types.CallbackQuery):
     shelter_id = callback.data[5:]
-    shelter = get_shelter_by_id(shelter_id)
-    if not shelter:
-        await callback.message.answer("Информация устарела")
-        return
+    row = get_shelter_by_id(shelter_id)
+    if row:
+        name, link, info, post_date = row
 
-    name, link, info, post_date = shelter
-    address = extract_address(info or "")[:50]  # Используем новый парсер
-    needs = extract_needs(info or "")
-    
-    msg = (
-        f"<b>{name}</b>\n"
-        f"⏳ {days_ago(post_date)}\n"
-        f"📍 {linkify_address(address)}\n"
-        f"📞 {extract_contacts(info or '')}\n\n"
-        f"<i>{needs}</i>\n"
-        f"<a href='{link}'>🔗 Оригинальный пост</a>"
-    )
+        # Делаем адрес кликабельным через Google Maps
+        link_encoded = quote(link)
+        link_url = f"https://www.google.com/maps/search/{link_encoded}"
+        link_html = f'<a href="{link_url}">{link}</a>'
 
-    markup = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="💾 Сохранить", callback_data=f"fav|{shelter_id}|{link}"),
-        InlineKeyboardButton(text="🗺 Карта", url=f"https://yandex.ru/maps/?text={quote(address)}")
-    ]])
+        msg = f"<b>{name}</b>\n{link_html}\n"
 
-    # Управление историей сообщений
-    user_id = callback.from_user.id
-    try:
+        # Если есть дата, вычисляем, сколько дней назад был пост
+        if post_date:
+            try:
+                # Пробуем формат YYYY-MM-DD, можно добавить другие варианты при необходимости
+                dt = datetime.strptime(post_date, "%Y-%m-%d")
+            except Exception as e:
+                try:
+                    dt = datetime.strptime(post_date, "%d.%m.%Y")
+                except Exception as e:
+                    dt = None
+            if dt:
+                days_ago = (datetime.now() - dt).days
+                msg += f"\n🗓 {days_ago} дней назад\n"
+
+        # Обработка и структурирование информации в блоке "что нужно:"
+        if info:
+            cleaned_info, urgency = clean_info(info)
+        else:
+            cleaned_info, urgency = "Нет описания.", "Не указано"
+        msg += f"\n<b>Что нужно:</b>\n{trim_to_sentence(cleaned_info)}\n"
+        msg += f"\n<b>Срочность:</b> {urgency}"
+
+        # Кнопка сохранения в избранное изменена на "💾 Сохранить"
+        button_markup = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="💾 Сохранить", callback_data=f"fav|{shelter_id}|{link}")]
+            ]
+        )
+        # Удаляем предыдущую информацию, если таковая уже была отправлена пользователю
+        user_id = callback.from_user.id
         if user_id in user_last_msg:
-            await callback.message.bot.delete_message(
-                chat_id=callback.message.chat.id,
-                message_id=user_last_msg[user_id]
-            )
-    except:
-        pass
-    
-    sent = await callback.message.answer(
-        msg, 
-        reply_markup=markup, 
-        parse_mode="HTML",
-        disable_web_page_preview=True
-    )
-    user_last_msg[user_id] = sent.message_id
+            try:
+                await callback.message.bot.delete_message(callback.message.chat.id, user_last_msg[user_id])
+            except Exception as e:
+                print(f"Ошибка удаления предыдущего сообщения: {e}")
+        sent_msg = await callback.message.answer(msg, reply_markup=button_markup, parse_mode="HTML")
+        user_last_msg[user_id] = sent_msg.message_id
+    else:
+        await callback.message.answer("Не удалось найти информацию.")
     await callback.answer()
 
-# Остальные обработчики без изменений...
+@dp.callback_query(lambda c: c.data.startswith("fav|"))
+async def add_to_favorites(callback: types.CallbackQuery):
+    _, group_id, post_url = callback.data.split("|")
+    user_id = callback.from_user.id
+    add_favorite(user_id, post_url, group_id)
+    await callback.answer("Добавлено в сохранённые! 💾")
+
+def get_favorite_shelter_markup(group_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton("🆕 Свежие посты приюта", callback_data=f"recent_posts_{group_id}")]]
+    )
+
+@dp.message(Command("fav"))
+async def show_favorites(message: Message):
+    user_id = message.from_user.id
+    favorites = get_user_favorites(user_id)
+    if not favorites:
+        await message.reply("У вас нет сохранённых постов.")
+        return
+    for post_url, group_id in favorites:
+        await message.answer(f"🔗 {post_url}", reply_markup=get_favorite_shelter_markup(group_id))
+
+@dp.callback_query(lambda c: c.data.startswith("recent_posts_"))
+async def handle_recent_posts(callback_query: types.CallbackQuery):
+    group_id = callback_query.data.replace("recent_posts_", "")
+    posts = get_recent_posts_for_group(group_id)
+    if posts:
+        for url, text in posts:
+            msg = f"{trim_to_sentence(text)}\n\n🔗 {url}"
+            await callback_query.message.answer(msg)
+    else:
+        await callback_query.message.answer("Нет свежих постов за последние 7 дней 😿")
+    await callback_query.answer()
