@@ -1,5 +1,4 @@
 from vk_parser import search_vk_groups
-from update_favorite_posts import update_favorite_posts
 from database import init_db
 
 CITIES = ["Новосибирск"]  # Можно менять
