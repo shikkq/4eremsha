@@ -1,3 +1,4 @@
+
 import requests
 import re
 import time
@@ -13,7 +14,6 @@ VK_KEYWORDS = os.getenv("VK_KEYWORDS", "приют,животные,кошки,�
 VK_API_VERSION = "5.199"
 CACHE_FILE = "parsed_groups.json"
 
-# Загрузка кэша
 if os.path.exists(CACHE_FILE):
     with open(CACHE_FILE, "r", encoding="utf-8") as f:
         parsed_groups = set(json.load(f))
@@ -25,7 +25,6 @@ def save_cache():
         json.dump(list(parsed_groups), f)
 
 def get_group_info(group_id):
-    """Получаем расширенную информацию о группе"""
     url = "https://api.vk.com/method/groups.getById"
     params = {
         "access_token": VK_TOKEN,
@@ -37,31 +36,33 @@ def get_group_info(group_id):
         res = requests.get(url, params=params).json()
         return res.get('response', [{}])[0]
     except Exception as e:
-        print(f"Ошибка при получении информации о группе: {e}")
+        print(f"[Ошибка] Получение информации о группе {group_id}: {e}")
         return {}
 
 def is_city_match(group_info, target_city):
-    """Проверяем совпадение города в данных группы"""
     target_lower = target_city.lower()
-    
-    # Проверка официального города группы
+    description = group_info.get('description', '').lower()
+
     if 'city' in group_info:
         group_city = group_info['city']['title'].lower()
         if target_lower in group_city:
+            print(f"[Город] Найдено совпадение по полю city: {group_city}")
             return True
-    
-    # Поиск в описании группы
-    description = group_info.get('description', '').lower()
+
     patterns = [
         rf"\b{re.escape(target_lower)}\b",
         rf"\bг\.?\s*{re.escape(target_lower)}\b",
-        rf"\b{re.escape(target_lower[:5])}\w*\b"  # Для сокращений типа "Новосиб"
+        rf"\b{re.escape(target_lower[:5])}\w*\b"
     ]
-    
-    return any(re.search(pattern, description) for pattern in patterns)
+
+    if any(re.search(pattern, description) for pattern in patterns):
+        print(f"[Город] Найдено совпадение в описании группы")
+        return True
+
+    print(f"[Отклонено] Город {target_city} не найден в группе")
+    return False
 
 def get_group_posts(group_id):
-    """Получаем посты группы (без изменений)"""
     url = "https://api.vk.com/method/wall.get"
     params = {
         "access_token": VK_TOKEN,
@@ -74,25 +75,30 @@ def get_group_posts(group_id):
         res = requests.get(url, params=params).json()
         return res.get("response", {}).get("items", [])
     except Exception as e:
-        print(f"Ошибка при получении постов: {e}")
+        print(f"[Ошибка] Получение постов для группы {group_id}: {e}")
         return []
 
 def extract_post_info(posts):
-    """Анализ постов (убрана проверка города)"""
     relevant_posts = []
     for post in posts:
         text = post.get('text', '')
-        if any(kw in text.lower() for kw in VK_KEYWORDS):
+        if not text.strip():
+            print("[Отклонено] Пост без текста")
+            continue
+
+        lower_text = text.lower()
+        if any(kw.strip() in lower_text for kw in VK_KEYWORDS):
+            print(f"[Принят] Пост содержит ключевые слова")
             relevant_posts.append({
                 'date': datetime.fromtimestamp(post['date']).strftime("%d.%m.%Y"),
                 'text': text[:500]
             })
+        else:
+            print(f"[Отклонено] Пост не содержит ключевые слова: {text[:100]}...")
     return relevant_posts
 
 def search_vk_groups(city_name):
-    """Основная функция поиска"""
     print(f"\n🔍 Начинаем поиск для города: {city_name}")
-    
     total_added = 0
     exclusion_keywords = ["бизнес", "магазин", "реклама", "доставка"]
 
@@ -102,67 +108,58 @@ def search_vk_groups(city_name):
             url = "https://api.vk.com/method/groups.search"
             params = {
                 "access_token": VK_TOKEN,
-                "q": f"{keyword}",
+                "q": keyword,
                 "count": 20,
                 "offset": offset,
                 "v": VK_API_VERSION
             }
-            
+
             try:
                 response = requests.get(url, params=params).json()
                 groups = response.get('response', {}).get('items', [])
-                
+                print(f"[{keyword}] Найдено групп: {len(groups)}")
+
                 for group in groups:
                     group_id = abs(group['id'])
                     if group_id in parsed_groups:
+                        print(f"[Пропущено] Группа уже обработана: {group['name']}")
                         continue
-                        
-                    # Получаем полную информацию о группе
+
                     group_info = get_group_info(group_id)
-                    time.sleep(0.3)  # Защита от лимита API
-                    
-                    # Проверка города в описании
+                    time.sleep(0.3)
+
                     if not is_city_match(group_info, city_name):
                         continue
-                        
-                    # Фильтр по названию группы
+
                     group_name = group['name'].lower()
                     if any(bw in group_name for bw in exclusion_keywords):
+                        print(f"[Отклонено] Название содержит стоп-слово: {group_name}")
                         continue
-                        
-                    # Анализ постов
+
                     posts = get_group_posts(group_id)
                     post_info = extract_post_info(posts)
-                    
+
                     if not post_info:
+                        print(f"[Отклонено] Нет подходящих постов в группе {group['name']}")
                         continue
-                        
-                    # Сохранение результатов
-                    add_shelter(
-                        f"vk_{group_id}",
-                        group['name'],
-                        f"https://vk.com/{group['screen_name']}",
-                        city_name,
-                        json.dumps(post_info, ensure_ascii=False)
-                    )
-                    
+
+                    # ВСТАВЬ сюда свою функцию сохранения приюта
+                    # add_shelter(...)
+
                     parsed_groups.add(group_id)
                     total_added += 1
-                    print(f"✅ Добавлена группа: {group['name']}")
-                    
+                    print(f"[✅ Добавлена] Группа: {group['name']}")
+
                     if total_added >= 10:
                         break
-                        
+
                 offset += 20
                 if offset >= 100:
                     break
-                    
+
             except Exception as e:
-                print(f"Ошибка при обработке групп: {e}")
+                print(f"[Ошибка] Обработка keyword='{keyword}': {e}")
                 break
 
     save_cache()
-    print(f"🏁 Поиск завершен. Добавлено групп: {total_added}")
-
-# Пример вызова
-search_vk_groups("Новосибирск")
+    print(f"🏁 Поиск завершён. Добавлено групп: {total_added}")
